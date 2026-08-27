@@ -29,7 +29,8 @@ from attenuator_app.tools.service_calc import (           # noqa: E402
     DEFAULT_CALIBRATION_PATH, Calibration, Metric, attenuation_db_pair,
     load_calibration)
 from attenuator_app.cwapp.state import (                  # noqa: E402
-    ANGLE_TOLERANCE_DEG, THETA_MAX, THETA_MIN, THETA_STEP, CwParams)
+    ANGLE_TOLERANCE_DEG, THETA_MAX, THETA_MIN, THETA_STEP, CwParams,
+    passport_candidates)
 
 
 def theta_grid() -> np.ndarray:
@@ -84,8 +85,8 @@ class CwModel:
     """Состояние приложения. Один экземпляр на окно."""
 
     def __init__(self, calibration_path=None, params: CwParams | None = None):
-        self.cal: Calibration = load_calibration(
-            calibration_path or DEFAULT_CALIBRATION_PATH)
+        self.cal, self.passport_path, self.passport_note = self._open_passport(
+            calibration_path)
         # MVP: офсеты насадок приняты нулевыми (решение владельца 2026-08-27).
         # Погрешность установки поляризатора в ротатор учитывается оценкой
         # цены ошибки в 1 градус, а не отдельным параметром модели.
@@ -97,6 +98,45 @@ class CwModel:
         lo, hi = self.cal.band_thz
         self.params = params or CwParams(freq_thz=round((lo + hi) / 2.0, 3))
         self._result: CwResult | None = None
+
+    # -- паспорт прибора -----------------------------------------------
+    @staticmethod
+    def _open_passport(explicit=None):
+        """Первый годный паспорт из порядка поиска, иначе зашитый образец.
+
+        Кандидат проверяется тем же чтением, каким потом пользуется расчёт:
+        рядом с программой может лежать посторонний JSON (в том числе паспорт
+        другого формата -- из tkinter-линии), и падать на старте из-за чужого
+        файла приложение не должно. Негодный кандидат пропускается, причина
+        доходит до интерфейса вместе с именем взятого файла.
+
+        Возвращает (калибровка, путь, пометка для строки состояния).
+        """
+        skipped: list[str] = []
+        for path in passport_candidates(explicit):
+            try:
+                cal = load_calibration(path)
+            except (OSError, ValueError, KeyError, TypeError) as e:
+                # ЯВНО выбранный файл отказывает громко. Тихо перейти к
+                # следующему кандидату здесь нельзя: оператор указал файл
+                # пальцем, а расчёт пошёл бы по образцу -- ровно та подмена,
+                # ради которой правка и делалась
+                if explicit is not None and Path(path) == Path(explicit):
+                    raise ValueError("%s is not a valid passport file (%s)"
+                                     % (path.name, type(e).__name__)) from e
+                skipped.append("%s (%s)" % (path.name, type(e).__name__))
+                continue
+            note = "passport %s" % path.name
+            if skipped:
+                note += " · skipped %s" % ", ".join(skipped)
+            return cal, path, note
+        # последний рубеж: обезличенный образец внутри пакета. Молчать об этом
+        # нельзя -- на образце считать можно, измерять нельзя
+        cal = load_calibration(DEFAULT_CALIBRATION_PATH)
+        note = "built-in SAMPLE — not your device"
+        if skipped:
+            note += " · skipped %s" % ", ".join(skipped)
+        return cal, DEFAULT_CALIBRATION_PATH, note
 
     # -- служебное -----------------------------------------------------
     def _apply(self, p: CwParams) -> None:
@@ -156,7 +196,14 @@ class CwModel:
 
     # -- сводки для окна -----------------------------------------------
     def device_line(self) -> str:
-        return "%s · calibration %s" % (self.cal.device_id, self.cal.dataset)
+        """Строка состояния: прибор, набор калибровки и ОТКУДА он взят.
+
+        Источник паспорта в интерфейсе обязателен (требование владельца,
+        хэндофф 27.08): подмена паспорта зашитым образцом ничем себя не
+        выдаёт -- окно исправно, числа правдоподобны, прибор чужой.
+        """
+        return "%s · calibration %s · %s" % (
+            self.cal.device_id, self.cal.dataset, self.passport_note)
 
     def band_warning(self) -> str | None:
         """Предупреждение об экстраполяции за полосу калибровки.

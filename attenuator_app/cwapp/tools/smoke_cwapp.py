@@ -22,8 +22,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import shutil
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -348,8 +351,54 @@ def run(out: Path) -> int:                                 # noqa: C901
     check("таблица стилей не забирает отрисовку спинбокса", not styled,
           styled[0].strip() if styled else "правил нет")
 
+    # Паспорт прибора (правка 4 хэндоффа 27.08). Числовая часть порядка поиска
+    # проверена в `cwapp.selftest`; здесь -- то, что видно только в окне:
+    # орган выбора, имя взятого файла в строке состояния и живучесть окна при
+    # промахе в диалоге.
+    print("\n--- паспорт прибора ---")
+    check("в окне есть орган выбора паспорта",
+          callable(getattr(w, "_choose_passport", None))
+          and w.passport_button.isVisible(),
+          w.passport_button.text())
+    apply(theta1=25.0, theta2=0.0)
+    check("строка состояния называет источник паспорта",
+          "SAMPLE" in w.status.currentMessage(), w.status.currentMessage())
+
+    base = Path(tempfile.mkdtemp())
+    try:
+        src = json.loads((REPO / "attenuator_app" / "tools" / "calibration"
+                          / "SAMPLE.json").read_text(encoding="utf-8"))
+        src["device_id"] = "SMOKE-UNIT"
+        good = base / "device.json"
+        good.write_text(json.dumps(src), encoding="utf-8")
+        bad = base / "wrong.json"
+        bad.write_text('{"hello": 1}', encoding="utf-8")
+
+        before = w.model.result.value_db
+        ok_load = w.load_passport(str(good))
+        app.processEvents()
+        check("выбранный паспорт подхвачен и назван в окне",
+              ok_load and "device.json" in w.status.currentMessage(),
+              w.status.currentMessage())
+        check("параметры оператора пережили смену паспорта",
+              abs(w.params.theta1.value() - 25.0) < 1e-9,
+              "θ₁ %+.2f" % w.params.theta1.value())
+
+        bad_load = w.load_passport(str(bad))
+        app.processEvents()
+        check("негодный файл отвергнут вслух, окно живо",
+              (not bad_load) and w.isVisible()
+              and "rejected" in w.status.currentMessage(),
+              w.status.currentMessage()[:60])
+        check("после отказа остался прежний паспорт, а не образец",
+              w.model.passport_path.name == "device.json",
+              w.model.passport_path.name)
+        shot(w, out, "passport")
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
     print("\n########## ИТОГ ##########")
-    print("  снимков: %d, каталог %s" % (n + 2, out))
+    print("  снимков: %d, каталог %s" % (n + 3, out))
     if FAILURES:
         print("  ОТКАЗОВ: %d" % len(FAILURES))
         for f in FAILURES:

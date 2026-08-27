@@ -13,7 +13,9 @@ MVP v0.1 (решение владельца 2026-08-27): один вопрос -
 """
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 #: типы источника -- имена совпадают с `service_model.SOURCES`
 SOURCES = ("linear", "unpolarized", "partial")
@@ -100,3 +102,52 @@ def disabled_reason(p: CwParams, field: str) -> str | None:
     if field == "dop":
         return "a fully polarized or fully depolarized source has DOP fixed at 1 or 0"
     return None
+
+
+# --- где лежит паспорт прибора ------------------------------------------
+#: подкаталог рядом с программой, куда оператор кладёт паспорт своего прибора
+PASSPORT_SUBDIR = "passports"
+
+
+def program_dir() -> Path:
+    """Каталог, «рядом с которым» оператор кладёт паспорт.
+
+    ⚠ Под PyInstaller это `Path(sys.executable).parent`, и никак иначе.
+    `__file__` в собранном `.exe` указывает во временный распакованный
+    `_MEIPASS`, который создаётся заново при каждом запуске и стирается при
+    выходе: положенный оператором паспорт там не найдётся никогда, а
+    приложение молча возьмёт зашитый образец и посчитает верной арифметикой
+    неверные числа. Из исходников ошибка не проявляется вовсе -- отсюда и
+    проверка `passport_candidates` на поддельном `sys.frozen` в приёмке.
+
+    Из исходников «рядом с программой» -- корень репозитория, а не каталог
+    интерпретатора: класть паспорт рядом с `python.exe` никто не станет.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[2]
+
+
+def passport_candidates(explicit=None, base: Path | None = None) -> list[Path]:
+    """Пути к паспорту в порядке предпочтения, без единого обращения к диску
+    сверх перечисления каталога.
+
+    Порядок задан владельцем (хэндофф 27.08): явный выбор в интерфейсе ->
+    каталог рядом с исполняемым файлом -> зашитый образец последним рубежом.
+    Сам образец сюда не входит: он подставляется расчётным слоем, когда ни
+    один кандидат не подошёл, и в интерфейсе это видно отдельной пометкой.
+
+    Функция чистая (кроме `glob`) и проверяется без запуска окна -- правило
+    поиска файла из тех, что разъезжаются молча.
+    """
+    out: list[Path] = []
+    if explicit:
+        out.append(Path(explicit))
+    root = Path(base) if base is not None else program_dir()
+    for folder in (root / PASSPORT_SUBDIR, root):
+        try:
+            found = sorted(folder.glob("*.json"))
+        except OSError:                    # каталога нет или он недоступен
+            continue
+        out.extend(f for f in found if f not in out)
+    return out
