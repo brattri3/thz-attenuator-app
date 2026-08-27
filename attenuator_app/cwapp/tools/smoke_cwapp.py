@@ -39,7 +39,7 @@ try:
 except Exception:                                          # noqa: BLE001
     pass
 
-from PySide6 import QtGui, QtWidgets                       # noqa: E402
+from PySide6 import QtCore, QtGui, QtWidgets               # noqa: E402
 
 from attenuator_app.cwapp import theme                     # noqa: E402
 from attenuator_app.cwapp.mainwindow import CwMainWindow   # noqa: E402
@@ -54,6 +54,45 @@ def check(name: str, ok: bool, note: str = "") -> None:
     print(("  [OK] " if ok else "  [FAIL] ") + name + (("   " + note) if note else ""))
     if not ok:
         FAILURES.append(name)
+
+
+def _spin_buttons(sb):
+    """Прямоугольники стрелок вверх/вниз так, как их считает сам стиль."""
+    opt = QtWidgets.QStyleOptionSpinBox()
+    opt.initFrom(sb)
+    opt.rect = sb.rect()
+    opt.subControls = QtWidgets.QStyle.SC_All
+    opt.buttonSymbols = sb.buttonSymbols()
+    opt.frame = True
+    style = sb.style()
+    return (style.subControlRect(QtWidgets.QStyle.CC_SpinBox, opt,
+                                 QtWidgets.QStyle.SC_SpinBoxUp, sb),
+            style.subControlRect(QtWidgets.QStyle.CC_SpinBox, opt,
+                                 QtWidgets.QStyle.SC_SpinBoxDown, sb))
+
+
+def _click(app, widget, point) -> None:
+    """Настоящий щелчок мышью, а не вызов stepBy: проверяется попадание."""
+    pos = QtCore.QPointF(point)
+    for kind in (QtCore.QEvent.MouseButtonPress, QtCore.QEvent.MouseButtonRelease):
+        QtWidgets.QApplication.sendEvent(widget, QtGui.QMouseEvent(
+            kind, pos, pos, QtCore.Qt.LeftButton, QtCore.Qt.LeftButton,
+            QtCore.Qt.NoModifier))
+    app.processEvents()
+
+
+def _arrow_width(img, rect, pad: int = 3) -> int:
+    """Ширина нарисованной стрелки в пикселях.
+
+    Отступ `pad` отрезает рамку самой кнопки: она есть в обоих случаях и
+    считать её как «стрелка нарисована» нельзя -- на этом первая редакция
+    проверки и промахнулась, дав одинаковые числа до и после правки.
+    """
+    xs = [x
+          for y in range(rect.top() + pad, min(rect.bottom() + 1 - pad, img.height()))
+          for x in range(rect.left() + pad, min(rect.right() + 1 - pad, img.width()))
+          if img.pixelColor(x, y).lightness() < 160]
+    return (max(xs) - min(xs) + 1) if xs else 0
 
 
 def shot(window, out: Path, tag: str) -> None:
@@ -225,6 +264,46 @@ def run(out: Path) -> int:                                 # noqa: C901
     on = w.params.det_buttons["power"].grab().toImage()
     check("выбранная радиокнопка видна на пикселях", off != on,
           "одинаковы — индикатор не рисуется" if off == on else "отличается")
+
+    # Стрелки спинбокса. Дефект владельца «не работают кнопки вверх» (правка 1
+    # хэндоффа 27.08) был не в диапазоне и не в обработчике: щелчок исправно
+    # шагал значение, но правило таблицы стилей на QDoubleSpinBox переводило
+    # виджет в разбор QSS целиком, и стрелка ВВЕРХ срезалась по высоте до
+    # чёрточки. Числа этого не видят -- поэтому проверок две: шаг и пиксели.
+    print("\n--- стрелки спинбокса ---")
+    for name in ("theta1", "theta2", "freq", "psi", "analyzer"):
+        sb = getattr(w.params, name)
+        if not sb.isEnabled():
+            continue
+        up, down = _spin_buttons(sb)
+        before = sb.value()
+        _click(app, sb, up.center())
+        stepped_up = sb.value() > before
+        mid = sb.value()
+        _click(app, sb, down.center())
+        stepped_down = sb.value() < mid
+        check("%s: щелчок по стрелке шагает в обе стороны" % name,
+              stepped_up and stepped_down,
+              "вверх %+.3f -> %+.3f, вниз -> %+.3f" % (before, mid, sb.value()))
+        img = sb.grab().toImage()
+        # Стрелка обязана быть РАЗЛИЧИМОЙ, а не просто присутствовать. Нативная
+        # занимает около 2/3 ширины кнопки (10 px из 16), при разборе таблицей
+        # стилей вырождается в 4 px из 20 -- четырёхпиксельная закорючка и
+        # читается оператором как «кнопки нет». Порог в долях ширины кнопки, а
+        # не в пикселях: абсолютный размер зависит от масштаба экрана.
+        for label, r in (("вверх", up), ("вниз", down)):
+            wid = _arrow_width(img, r)
+            check("%s: стрелка %s различима" % (name, label),
+                  wid >= 0.4 * r.width(),
+                  "%d px при кнопке %d px" % (wid, r.width()))
+
+    # Прямая страховка от возврата причины: правило QSS, задающее спинбоксу
+    # фон, рамку или отступы, снова отключит нативную отрисовку подконтролей.
+    styled = [ln for ln in theme.QSS.splitlines()
+              if "QDoubleSpinBox" in ln and "::" not in ln
+              and any(k in ln for k in ("background:", "border:", "padding:"))]
+    check("таблица стилей не забирает отрисовку спинбокса", not styled,
+          styled[0].strip() if styled else "правил нет")
 
     print("\n########## ИТОГ ##########")
     print("  снимков: %d, каталог %s" % (n + 2, out))
