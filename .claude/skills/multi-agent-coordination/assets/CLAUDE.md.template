@@ -1,0 +1,77 @@
+# CLAUDE.md — \<PROJECT NAME\>
+
+One or two sentences: what this project is, what its core artifact/output is.
+
+Documentation and commit language: **\<LANGUAGE\>**.
+
+## Your start
+
+Several role-sessions share this repository (\<list role IDs\> + orchestrator `ORCH`).
+
+1. Name your session: `claude -n <role-session-name>` or `/rename`.
+2. Once, check `claude agents --json`: if a session with your name is already `busy` in this
+   `cwd`, don't start — tell the owner.
+3. **Read `coordination/roles/<ID>.md` — the only required file.** It has your zone, what's
+   open, what's next, and where to go for detail.
+
+Nothing else is required reading at start. Everything else is read on demand — see the index
+below.
+
+> Claude Code itself coordinates sessions **as processes**; this project's own rules only
+> coordinate the **subject-matter** work. There are no locks, heartbeats, or nickname registries
+> here — don't add them; `claude agents` already answers "who's working right now."
+
+## Guardrails — breaking these is not easily reversible
+
+Fill this section in with your project's actual hard constraints. Typical shape:
+
+- Some path is **read-only** for every role except one, which touches it only under a
+  one-time owner sign-off (e.g. production data, a frozen pipeline).
+- `git push` — **only with the owner's direct permission**. Never force-push, `rm -rf`, or
+  rewrite history.
+- **Work only in your own zone.** A request outside it doesn't get done — explain whose zone it
+  is, log it in `coordination/HANDOFFS.md`, offer to switch. Not sure whose zone — ask.
+- Commit format: `[<ID>]` prefix + trailers **as the last paragraph, no blank line inside the
+  block** (`CHARTER.md §4` has the exact gotcha and why it matters).
+- Any domain-specific quality bar worth stating as a hard rule (e.g. "a fit result needs residual
+  statistics, not just one number").
+
+## Index: what to read, and when
+
+As files grow, keep this table's byte/token estimates honest — a stale number here means a role
+decides "read or skip" based on a price that stopped being true, which is worse than no estimate
+at all. Whoever edits a listed file is responsible for updating its row.
+
+`coordination/roles/<ID>.md` cold-start budget (suggest ≤1200 tokens ≈ 2400 bytes) is checked
+automatically by the `SessionStart` hook this skill installs
+(`.claude/hooks/check-context-budget.sh` + `budget.json`) — see `references/setup.md` in this
+skill for how it's wired in. That means the number in this table can't silently go stale the way
+a purely-documented budget would — the hook warns on its own when a role file grows past it.
+
+| File | Cost | Read when |
+|---|---|---|
+| `coordination/roles/<ID>.md` | ≤2400 B, every role | **always, at start** |
+| `coordination/CHARTER.md` | ~ | a rule is unclear or you're about to break it |
+| `coordination/PROJECT.md` | ~ | need the whole role/zone table |
+| `coordination/OWNERSHIP.md` | ~ | a zone dispute, or creating a new top-level directory |
+| `coordination/INDEX.md` (if you generate one — see `build_index.py`) | ~ | need the open-items list from QUESTIONS/HANDOFFS without grepping |
+| `coordination/QUESTIONS.md` | ~ | ⚠ **search, don't read in full** once it's grown — need the owner's decision on something |
+| `coordination/HANDOFFS.md` | ~ | ⚠ **search, don't read in full** once it's grown |
+| `coordination/ACTIVITY.md` | ~ | ⚠ **never in full** once it's grown — search by date/tag |
+
+## Repository layout
+
+Fill in per project: which directories are the active/live layer, which (if any) are frozen
+legacy, which hold applications/tools, where history goes (`archive/`).
+
+## Path-dependent rules
+
+If your project has commands, data formats, or domain background that only matters when a
+session actually touches specific paths, don't put them in this always-loaded file — put them in
+`.claude/rules/*.md` with a `paths:` frontmatter glob instead (see `references/setup.md` for the
+mechanism and why it's worth using: it keeps cold start cheap for roles that never touch those
+paths, while still being there automatically the moment a session does touch them).
+
+| Rule | Fires on | What's inside |
+|---|---|---|
+| *(example)* `.claude/rules/pipeline-commands.md` | `src/pipeline/**` | run/test/verify commands |

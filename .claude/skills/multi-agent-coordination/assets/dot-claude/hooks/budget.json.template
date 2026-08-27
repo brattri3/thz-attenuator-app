@@ -1,0 +1,8 @@
+{
+  "_comment": "Cold-start budget. Unit is UTF-8 bytes (wc -c), not Unicode codepoints and not tokens. Calibrate bytes-per-token for YOUR content once: pick a representative roles/<ID>.md file, run `wc -c` on it, and compare against what your model/tooling reports as its token count for the same text (Claude Code's /context, or any tokenizer). Don't assume 4 chars/token — that number drifts a lot with language (Cyrillic/CJK cost more bytes per token than Latin) and with how much of the file is code/tables vs prose. limit_bytes below assumes a target of roughly 1200 tokens; adjust both the calibration and the limit for your project.",
+  "unit": "bytes",
+  "chars_per_token_calibration": "MEASURE_YOUR_OWN — see _comment",
+  "files": [
+    { "glob": "coordination/roles/*.md", "limit_bytes": 2400 }
+  ]
+}

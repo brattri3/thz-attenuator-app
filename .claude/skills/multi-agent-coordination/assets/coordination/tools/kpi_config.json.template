@@ -1,0 +1,7 @@
+{
+  "_comment": "Config for kpi_git.py. Both fields are optional — omit or empty-array/empty-object what you don't need. Fill in real values only once you've actually hit the two problems below; don't pre-populate this speculatively.",
+  "excluded_commits": {
+    "_example": "abc1234 for a full sha or a short prefix. Use this for commits that bulk-import a pre-existing working tree (recreating the repo, importing an old project) rather than representing a role's own work — otherwise whoever ran the import command gets credited with the entire project's pre-history."
+  },
+  "not_authored_prefixes": []
+}

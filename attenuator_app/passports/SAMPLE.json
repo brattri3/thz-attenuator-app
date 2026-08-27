@@ -1,0 +1,82 @@
+{
+  "serial": "SAMPLE (обезличенный образец)",
+  "model": "THz Tunable Precision Attenuator ATT-11-16-CA85",
+  "aperture_mm": 85.0,
+  "P_um": {
+    "value": 15.5,
+    "sigma": 0.025510672840246097,
+    "source": "spec_95ci"
+  },
+  "D_eff_um": {
+    "value": 5.67,
+    "sigma": 0.2492278252993866,
+    "source": "session_spread"
+  },
+  "D_phys_um": 11.0,
+  "loss_factor": {
+    "value": 0.255,
+    "sigma": 0.1419957727962457,
+    "source": "session_spread"
+  },
+  "gamma": {
+    "value": 1.58,
+    "sigma": 0.0,
+    "source": "spec_fixed"
+  },
+  "gamma_range": [
+    1.0,
+    2.5
+  ],
+  "eta0": {
+    "value": 0.0,
+    "sigma": 0.0,
+    "source": "fixed"
+  },
+  "eta_exp": 1.0,
+  "delta0": 0.0,
+  "tau_leak_ps": {
+    "value": 0.0,
+    "sigma": 0.0,
+    "source": "fixed"
+  },
+  "tau_ps": {
+    "value": 0.0,
+    "sigma": 0.0,
+    "source": "fixed"
+  },
+  "tau_par_ps": {
+    "value": 0.0,
+    "sigma": 0.0,
+    "source": "fixed"
+  },
+  "angle_offset_deg": {
+    "value": -0.45,
+    "sigma": 0.9575372017183136,
+    "source": "session_spread"
+  },
+  "ideal_elements": false,
+  "band_thz": [
+    0.05,
+    2.0
+  ],
+  "fit_scheme": "S0",
+  "fit_detector": "coherent",
+  "calibration_note": "ОБРАЗЕЦ. Идентификаторы экземпляра удалены при переносе в публичный репозиторий (решение владельца В-40, 2026-08-27). Числа сохранены и физически осмысленны, но это НЕ паспорт вашего прибора: для измерений положите рядом с программой файл, полученный вместе с изделием.",
+  "datasets": [
+    "sample"
+  ],
+  "model_rmse_db": 1.39,
+  "model_rmse_note": "паспортная RMSE аппроксимации, динамический диапазон до -45 дБ; доминируют неучтённые переотражения между решётками и дифракционное рассеяние при theta > 50 град",
+  "scale": {
+    "division_deg": 1.0,
+    "zero_set_deg": null
+  },
+  "film": {
+    "name": "Tydex film D50-100",
+    "K1": 0.8,
+    "K2_low_band": 9.411764705882353e-05,
+    "K2_high_band": 0.0032,
+    "band_split_thz": 1.2,
+    "lines_per_mm": 1200.0
+  }
+}
