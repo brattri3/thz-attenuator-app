@@ -1,0 +1,53 @@
+name: Coordination checks
+
+# Server-side mirror of two rules this scaffold otherwise only enforces client-side (a local
+# SessionStart/PostToolUse hook, which only fires if a given session happens to have it wired
+# into .claude/settings.json). A rule enforced here stays true regardless of which session,
+# environment, or human pushed the commit — see references/git-github-rails.md for why this is
+# worth the extra file for a project that's outgrown "trust the local hook."
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history — trailer check needs the real commit object, not a shallow stub
+
+      - name: Commit trailers (CHARTER.md §4 format)
+        run: |
+          set -e
+          # On a pull_request event, github.sha is a synthetic merge commit — check the PR's
+          # actual head commit instead, so this checks what was authored, not what GitHub built.
+          sha="${{ github.event.pull_request.head.sha || github.sha }}"
+          echo "checking trailers on $sha"
+          msg="$(git log -1 --format=%B "$sha")"
+          trailers="$(printf '%s' "$msg" | git interpret-trailers --parse)"
+          if [ -z "$trailers" ]; then
+            echo "::error::No trailers recognized on $sha. CHARTER.md §4: the Session:/Reason: block needs a blank line BEFORE it (separating it from the commit body) and NO blank line inside it — git's own parser requires exactly this, and this is exactly the failure mode it misses silently."
+            exit 1
+          fi
+          echo "trailers found:"
+          printf '%s\n' "$trailers"
+
+      - name: Cold-start budget (coordination/roles/*.md)
+        run: |
+          # Pass a synthetic startup payload to the budget hook
+          echo '{"source":"startup"}' | python .claude/hooks/check-context-budget.py > budget_out.txt
+          cat budget_out.txt
+          
+          # If the hook output contains a systemMessage (which it does when warning),
+          # fail the check so the PR author knows a role is overgrown.
+          if grep -q "systemMessage" budget_out.txt; then
+            echo "::error::One or more role files exceed the cold-start budget (see output above)."
+            echo "This is a soft limit locally, but strongly enforced in CI to prevent context decay."
+            exit 1
+          fi

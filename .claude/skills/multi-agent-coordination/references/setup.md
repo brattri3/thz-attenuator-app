@@ -47,7 +47,7 @@ it does, don't overwrite existing hooks):
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/check-context-budget.sh"
+            "command": "python .claude/hooks/check-context-budget.py"
           }
         ]
       }
@@ -56,14 +56,12 @@ it does, don't overwrite existing hooks):
 }
 ```
 
-Make the script executable: `chmod +x .claude/hooks/check-context-budget.sh`.
-
 Verify it actually fires and warns correctly before trusting it — write a `roles/TEST.md` file
 larger than the configured `limit_bytes`, then feed the hook synthetic stdin matching what
 `SessionStart` sends:
 
 ```bash
-echo '{"source":"startup"}' | bash .claude/hooks/check-context-budget.sh
+echo '{"source":"startup"}' | python .claude/hooks/check-context-budget.py
 ```
 
 You should see a `systemMessage` JSON line naming the oversized file. Delete the test file
@@ -116,6 +114,12 @@ python coordination/tools/kpi_git.py
 python coordination/tools/kpi_git.py --json coordination/reports/kpi_git.json
 ```
 
+If you are using the Streamlit dashboard, you will need to install its dependencies:
+
+```bash
+pip install -r assets/coordination/tools/dashboard/requirements.txt
+```
+
 Neither needs registering anywhere — run them manually, or wire either into a scheduled task if
 your tooling supports one (e.g. a Claude Code Routine that clones the repo read-only, regenerates
 `INDEX.md`, and commits it — only worth doing once the journals are large enough that a stale
@@ -125,3 +129,28 @@ index is actually costing someone time).
 `kpi_config.json.template`) — leave it absent until you actually hit the two problems it solves
 (a bulk-import commit skewing stats, or bulk data commits inflating "lines changed"); don't
 pre-populate it speculatively.
+
+## 6. Optional: git/GitHub rails
+
+Only do this once `references/git-github-rails.md` §"when this earns its place" actually applies
+— it's an add-on, not part of the base setup in §1–5 above.
+
+1. **CODEOWNERS.** Copy `assets/dot-github/CODEOWNERS.template` to `.github/CODEOWNERS`. Fill in
+   every `<...>_GITHUB_USER>` placeholder with a real GitHub username or team, mirroring
+   `OWNERSHIP.md`'s zones exactly (same paths, same owners) — the two files describing the same
+   fact differently is exactly the kind of drift `references/rationale.md` warns about elsewhere.
+
+2. **CI checks.** Copy `assets/dot-github/workflows/coordination-checks.yml.template` to
+   `.github/workflows/coordination-checks.yml` (drop the `.template` suffix). No placeholders to
+   fill — it reads `.claude/hooks/check-context-budget.sh` and `coordination/roles/*.md` at their
+   standard paths. Push it and confirm the workflow actually appears and runs (GitHub's Actions
+   tab) — don't assume it's wired up correctly from the YAML alone; the real verification is
+   watching it run once, the same way the local hook was verified with synthetic stdin in §2.
+
+3. **Branch protection (needs repo admin rights).** In the GitHub UI: Settings → Branches → Add
+   branch protection rule → target the default branch → enable "Require status checks to pass"
+   and select the `checks` job from `coordination-checks.yml` → optionally also enable "Require
+   review from Code Owners" (only meaningful once CODEOWNERS lists more than one real account —
+   see the caveat in `references/git-github-rails.md`). If doing this programmatically via `gh api`
+   or the REST API, the token needs admin-level access to the repo; if it doesn't, this is a
+   30-second manual step, not a blocker for the rest of the setup.

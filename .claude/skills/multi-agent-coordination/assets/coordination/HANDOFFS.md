@@ -38,3 +38,8 @@ of append-only, since the surrounding decision text above it isn't touched.
 - Context: why this role can't just do it itself (zone boundary), links to relevant code.
 - Done when: a concrete, checkable criterion — not "looks right."
 - **Status:** open
+## [2026-08-27] FROM ORCH TO toolsmith — Create requirements.txt for dashboard
+- What: Create ssets/coordination/tools/dashboard/requirements.txt containing dependencies for the new Streamlit dashboard (streamlit, pytest, etc.). Also update eferences/setup.md to mention running pip install -r assets/coordination/tools/dashboard/requirements.txt.
+- Context: We just built the dashboard but haven't formally documented its Python dependencies in a standard format.
+- Done when: requirements.txt exists and setup.md is updated.
+- **Status:** done

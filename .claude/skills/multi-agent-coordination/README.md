@@ -36,6 +36,9 @@ guardrails, then instantiates the templates. See [`SKILL.md`](SKILL.md) for exac
 and [`references/setup.md`](references/setup.md) for the manual/mechanical version of the same
 steps if you'd rather do it by hand.
 
+Русская версия концепции (обязательный и необязательный слой, границы, human-интерфейс):
+[`docs/ru/CONCEPT.md`](docs/ru/CONCEPT.md).
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE).

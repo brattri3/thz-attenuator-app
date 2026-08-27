@@ -77,6 +77,17 @@ launch a session, and where the guardrails live — not a full walkthrough of ev
 templates themselves are meant to be self-explanatory reading. Point them at
 `references/rationale.md` if they ask *why* something is shaped a particular way.
 
+### 5. Optional: git/GitHub rails
+
+Not part of the interview above, and not something to set up by default — only reach for it when
+the user explicitly asks about GitHub-side enforcement (CI, required reviewers, branch protection)
+or the project has actually hit a failure mode this addresses (a commit landed broken because a
+session skipped the local hook; a shared "hot spot" file keeps colliding). Read
+`references/git-github-rails.md` first — it covers what's genuinely documented as native Claude
+Code behavior versus a GitHub feature the project adds, which of `assets/dot-github/*` to copy in,
+and an explicit warning against moving `QUESTIONS.md`/`HANDOFFS.md` onto GitHub Issues. Same
+principle as step 3: don't pre-install this speculatively.
+
 ## Reviewing or fixing an existing setup
 
 If the user already has a coordination directory (theirs or one this skill set up before) and
@@ -94,3 +105,9 @@ skill's templates — their setup has presumably diverged for reasons specific t
 - `references/rationale.md` — the failure modes this scaffold's specific shapes were built to
   prevent, and why the fix looks the way it does. Read before removing or simplifying a piece of
   the scaffold.
+- `references/git-github-rails.md` — optional server-side layer (CODEOWNERS, CI checks, when to
+  use a real PR instead of a `HANDOFFS.md` entry) for a project that's outgrown pure client-side
+  enforcement. Read only when step 5 above applies.
+- `docs/ru/CROSS_PLATFORM_BRIDGE.md` - details on LLM agnosticism, Git Worktrees (`worktree_launcher.py`), and soft context limits.
+
+Also check `coordination/tools/status.py` as a useful CLI dashboard for human orchestrators to see the overall state of the project.

@@ -1,0 +1,29 @@
+# CODEOWNERS — generated from OWNERSHIP.md. Replace every <...>-github-user placeholder with a
+# real GitHub username or team before this does anything useful.
+#
+# GitHub uses the LAST matching rule, not the most specific one — order general to specific,
+# top to bottom, the same way you'd read OWNERSHIP.md's "exclusive zones" table from general
+# rule to override.
+
+# Default owner — reviews anything not claimed by a more specific rule below.
+*                              @<ORCH_GITHUB_USER>
+
+# One line per role's exclusive zone (mirror OWNERSHIP.md's "Exclusive zones" table exactly —
+# same paths, same owners, so the two files can't silently drift apart):
+# /path/owned/by/role/**       @<ROLE_GITHUB_USER>
+
+coordination/**                @<ORCH_GITHUB_USER>
+.github/**                     @<ORCH_GITHUB_USER>
+
+# ── Read before you rely on this file ──────────────────────────────────────────────────────
+#
+# CODEOWNERS only becomes an actual review GATE (not just a hint) once branch protection has
+# "Require review from Code Owners" turned on for the target branch — see references/setup.md
+# §6 for where to click. Without that setting this file just pre-fills the reviewer list on a
+# PR; nothing stops a merge without their approval.
+#
+# It also only means something if the listed owners are DIFFERENT GitHub accounts with actual
+# write access to the repo. In a single-maintainer repo, listing yourself as every zone's owner
+# is honest documentation of intent (this is who's responsible for this path) but is not a real
+# multi-person gate — you can always approve your own PR. Don't present it as enforcement it
+# isn't; see references/git-github-rails.md for the fuller version of this caveat.
