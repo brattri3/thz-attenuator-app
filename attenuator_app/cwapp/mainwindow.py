@@ -9,14 +9,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtNetwork, QtWidgets
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from attenuator_app.cwapp import __version__, theme        # noqa: E402
+from attenuator_app.cwapp import __version__, theme, updates  # noqa: E402
 from attenuator_app.cwapp.model import CwModel             # noqa: E402
 from attenuator_app.cwapp.state import CwParams            # noqa: E402
 from attenuator_app.cwapp.widgets.params import ParamsPanel    # noqa: E402
@@ -74,6 +74,13 @@ class CwMainWindow(QtWidgets.QMainWindow):
         self.update_button.clicked.connect(self._check_updates)
         self.status.addPermanentWidget(self.update_button)
 
+        #: один менеджер на окно: создавать его на каждый запрос значит терять
+        #: соединение и системные настройки прокси
+        self._network = QtNetwork.QNetworkAccessManager(self)
+        self._reply = None
+        #: последний ответ проверки обновлений -- читает дымовой прогон
+        self.last_update_answer = None
+
         self.params.changed.connect(self.recompute)
         self.recompute(self.params.value())
 
@@ -126,14 +133,61 @@ class CwMainWindow(QtWidgets.QMainWindow):
 
     # -- обновления -----------------------------------------------------
     def _check_updates(self) -> None:
-        """MVP: заглушка. Механизм описан в 13_CW_APP_RELEASES.md §5.
+        """Спросить GitHub, вышло ли что-то новее. Окно при этом живёт.
 
-        Автообновления не будет никогда: приборная программа не должна менять
-        себя между двумя измерениями одной серии.
+        Запрос идёт через `QtNetwork` -- он уже в PySide6-Essentials, так что
+        ради одного HTTP-запроса не тянется ни одной новой зависимости (план
+        релизов §5). Ответ приходит сигналом, а не ожиданием внутри слота: окно
+        не должно замирать, и у спектрометра это не теория -- машина там часто
+        без интернета, и таймаут отрабатывает целиком.
+
+        Автообновления нет и не будет: приборная программа не должна менять
+        себя между двумя измерениями одной серии. Скачивает и ставит человек.
         """
-        QtWidgets.QMessageBox.information(
-            self, "Check for updates",
-            "Update checking is not wired up in this build.\n\n"
-            "Version %s. Releases will be published in the application's own "
-            "repository; see docs/attenuator_app/13_CW_APP_RELEASES.md."
-            % __version__)
+        if self._reply is not None:
+            return                                   # запрос уже в пути
+        self.update_button.setEnabled(False)
+        self.status.showMessage("checking for updates…")
+
+        request = QtNetwork.QNetworkRequest(QtCore.QUrl(updates.RELEASES_URL))
+        request.setRawHeader(b"Accept", b"application/vnd.github+json")
+        request.setTransferTimeout(updates.TIMEOUT_MS)
+        self._reply = self._network.get(request)
+        self._reply.finished.connect(self._updates_answered)
+
+    def _updates_answered(self) -> None:
+        """Ответ (или его отсутствие) -> диалог. Весь разбор -- в `updates`."""
+        reply, self._reply = self._reply, None
+        self.update_button.setEnabled(True)
+        try:
+            status = reply.attribute(
+                QtNetwork.QNetworkRequest.HttpStatusCodeAttribute)
+            if reply.error() != QtNetwork.QNetworkReply.NoError and not status:
+                answer = updates.network_failure(reply.errorString(), __version__)
+            else:
+                answer = updates.interpret(int(status or 0),
+                                           bytes(reply.readAll()), __version__)
+        finally:
+            reply.deleteLater()
+        self.show_update_answer(answer)
+
+    def show_update_answer(self, answer) -> None:
+        """Показать готовый ответ. Отдельным методом -- чтобы дымовой прогон
+        проверял все четыре исхода, не выходя в сеть."""
+        self.last_update_answer = answer
+        self.status.showMessage("%s · v%s"
+                                % (self.model.device_line(), __version__))
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle("Check for updates")
+        box.setIcon(QtWidgets.QMessageBox.Warning if answer.is_failure
+                    else QtWidgets.QMessageBox.Information)
+        box.setText(answer.title)
+        box.setInformativeText(answer.text)
+        if answer.url:
+            box.setDetailedText("Releases page:\n%s" % answer.url)
+        box.setStandardButtons(QtWidgets.QMessageBox.Ok)
+        # `open`, а не `exec`: модально, но без собственного цикла событий --
+        # окно продолжает перерисовываться, а дымовой прогон не встаёт намертво
+        # на диалоге, которого некому нажать
+        box.open()
+        return box

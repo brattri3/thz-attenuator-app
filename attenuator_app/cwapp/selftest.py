@@ -28,6 +28,7 @@ if str(REPO) not in sys.path:
 
 from attenuator_app.tools.service_calc import (           # noqa: E402
     Metric, attenuation_db_pair, load_calibration)
+from attenuator_app.cwapp import updates                  # noqa: E402
 from attenuator_app.cwapp.model import CwModel, CwResult, theta_grid   # noqa: E402
 from attenuator_app.cwapp.state import (                  # noqa: E402
     CwParams, disabled_reason, enabled_fields, passport_candidates, program_dir)
@@ -303,6 +304,71 @@ def selfcheck() -> int:                                    # noqa: C901
            abs(r_new.value_db - old_val) < 1e-12,
            "%+.4f dB против прежних %+.4f dB (опорная точка CLI -4.77 дБ)"
            % (r_new.value_db, old_val))
+
+    # M22. Разбор версий: приставка v, разная длина номера, мусор. Ошибка тут
+    # тихо приводит либо к «обновлений нет» навсегда, либо к вечному
+    # предложению поставить то, что уже стоит.
+    ver_cases = [
+        (("v0.2.0", "0.1.0"), True), (("0.2.0", "0.1.0"), True),
+        (("v0.1.0", "0.1.0"), False), (("v0.1.0", "0.2.0"), False),
+        (("0.2", "0.2.0"), False), (("0.2.1", "0.2"), True),
+        (("v1.0.0-rc1", "0.9.0"), True), (("не версия", "0.1.0"), False),
+    ]
+    wrong = [args for args, want in ver_cases if updates.is_newer(*args) is not want]
+    _check(res, "M22 сравнение версий: приставка, длина номера, мусор",
+           not wrong, str(wrong) if wrong else "%d случаев" % len(ver_cases))
+
+    # M23. До первого тега GitHub отвечает 404 на /releases/latest. Это НЕ
+    # отказ: показать «проверить не удалось» значит напугать оператора
+    # поломкой там, где всё исправно.
+    none_yet = updates.interpret(404, None, "0.1.0")
+    _check(res, "M23 отсутствие релизов -- отдельный ответ, а не отказ",
+           none_yet.kind == "none" and not none_yet.is_failure,
+           "%s / %s" % (none_yet.kind, none_yet.title))
+
+    # M24. Четыре исхода различаются, и ни один не роняет разбор.
+    body_new = json.dumps({"tag_name": "v0.2.0", "published_at": "2026-09-01T10:00:00Z",
+                           "body": "* сменилась нормировка",
+                           "html_url": "https://example.invalid/r/0.2.0"})
+    outcomes = {
+        "available": updates.interpret(200, body_new, "0.1.0"),
+        "current": updates.interpret(200, json.dumps({"tag_name": "v0.1.0"}), "0.1.0"),
+        "none": updates.interpret(404, None, "0.1.0"),
+        "failed": updates.interpret(500, b"", "0.1.0"),
+    }
+    bad = [k for k, a in outcomes.items() if a.kind != k]
+    _check(res, "M24 четыре исхода проверки обновлений различаются",
+           not bad, str(bad) if bad else "available / current / none / failed")
+
+    # M25. Мусор вместо JSON и обрыв сети -- обычные ответы, а не исключения:
+    # программа обязана работать на машине без интернета, и у спектрометра это
+    # норма, а не редкий случай.
+    survived = True
+    try:
+        garbage = updates.interpret(200, b"<html>proxy login</html>", "0.1.0")
+        no_tag = updates.interpret(200, json.dumps({"name": "0.2.0"}), "0.1.0")
+        offline = updates.network_failure("Host not found", "0.1.0")
+    except Exception:                                      # noqa: BLE001
+        survived = False
+    _check(res, "M25 мусор в ответе и обрыв сети не роняют разбор",
+           survived and garbage.is_failure and no_tag.is_failure
+           and offline.is_failure and "0.1.0" in offline.text,
+           "мусор/без тега/офлайн -> failed")
+
+    # M26. В тексте про доступную версию названы обе стороны и сказано, что
+    # ставит человек: автообновления нет и не будет (решение владельца, §5).
+    avail = outcomes["available"]
+    _check(res, "M26 текст обновления называет обе версии и ручную установку",
+           "0.2.0" in avail.text and "0.1.0" in avail.text
+           and "by hand" in avail.text and avail.url.endswith("0.2.0"),
+           avail.text.splitlines()[0])
+
+    # M27. Модуль обновлений не тянет Qt: он обязан проверяться числами, без
+    # окна и без сети -- ровно то разделение, что и у расчётного слоя.
+    qt_in_updates = [n for n in sys.modules
+                     if n.startswith(("PySide6", "PyQt"))]
+    _check(res, "M27 разбор обновлений живёт без Qt", not qt_in_updates,
+           str(qt_in_updates) if qt_in_updates else "чисто")
 
     ok, total = sum(res), len(res)
     print("\n=== %d/%d пройдено ===" % (ok, total))

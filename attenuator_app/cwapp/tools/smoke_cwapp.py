@@ -48,7 +48,10 @@ from attenuator_app.cwapp import theme                     # noqa: E402
 from attenuator_app.cwapp.mainwindow import CwMainWindow   # noqa: E402
 
 #: методы, которые обязаны существовать: дешёвая страховка от разрыва класса
-REQUIRED = ("recompute", "_check_updates")
+REQUIRED = ("recompute", "_check_updates", "show_update_answer", "load_passport")
+
+#: код «всё в порядке» -- имя вместо голого числа в перечислении исходов
+json_status_ok = 200
 
 FAILURES: list[str] = []
 
@@ -443,6 +446,50 @@ def run(out: Path) -> int:                                 # noqa: C901
         shot(w, out, "passport")
     finally:
         shutil.rmtree(base, ignore_errors=True)
+
+    # Проверка обновлений (план релизов §5). Разбор ответов проверен числами в
+    # `cwapp.selftest` (M22…M27); здесь -- окно: диалог всех четырёх исходов, и
+    # то, что живой запрос не вешает интерфейс. Сеть тут не обязательна: её
+    # отсутствие -- один из проверяемых исходов, а не причина красного прогона.
+    print("\n--- проверка обновлений ---")
+    from attenuator_app.cwapp import updates                # noqa: E402
+    for kind, answer in (
+            ("available", updates.interpret(
+                json_status_ok, json.dumps({"tag_name": "v0.9.0"}), "0.1.0")),
+            ("current", updates.interpret(
+                json_status_ok, json.dumps({"tag_name": "v0.1.0"}), "0.1.0")),
+            ("none", updates.interpret(404, None, "0.1.0")),
+            ("failed", updates.network_failure("Host not found", "0.1.0"))):
+        box = w.show_update_answer(answer)
+        app.processEvents()
+        ok = (box is not None and box.isVisible()
+              and w.last_update_answer.kind == kind
+              and box.text() == answer.title)
+        check("диалог обновлений: исход «%s»" % kind, ok,
+              "%s — %s" % (box.text(), box.informativeText().splitlines()[0])
+              if box else "диалог не построен")
+        box.close()
+        app.processEvents()
+    check("окно пережило все четыре диалога", w.isVisible() and w.model.result is not None,
+          "%+.3f dB на экране" % w.model.result.value_db)
+
+    # Живой запрос: интересует не наличие интернета, а то, что кнопка не
+    # запирается навсегда и окно не замирает. Отказ сети -- штатный ответ.
+    w._check_updates()
+    check("на время запроса кнопка занята", not w.update_button.isEnabled(),
+          w.status.currentMessage()[:40])
+    waited = 0
+    while w._reply is not None and waited < 12000:
+        app.processEvents()
+        QtCore.QThread.msleep(50)
+        waited += 50
+    check("запрос завершился и кнопка освободилась",
+          w._reply is None and w.update_button.isEnabled(),
+          "за %d мс, исход «%s»" % (waited, w.last_update_answer.kind
+                                    if w.last_update_answer else "нет ответа"))
+    for child in w.findChildren(QtWidgets.QMessageBox):
+        child.close()
+    app.processEvents()
 
     print("\n########## ИТОГ ##########")
     print("  снимков: %d, каталог %s" % (n + 3, out))
