@@ -351,6 +351,53 @@ def run(out: Path) -> int:                                 # noqa: C901
     check("таблица стилей не забирает отрисовку спинбокса", not styled,
           styled[0].strip() if styled else "правил нет")
 
+    # Нормировка на максимум (правка 3, решение владельца П-2 от 27.08).
+    # Числовая часть -- в `cwapp.selftest` (M18…M21); здесь то, что видно
+    # только в окне: подпись обязана сказать, куда уехала опора, и сделать это
+    # заметно. Молчаливое показание при наклонённом источнике -- это число,
+    # которое оператор сравнит с прошлым протоколом и получит расхождение из
+    # ниоткуда.
+    print("\n--- нормировка на максимум ---")
+    apply(source="linear", detector="coherent", theta1=25.0, theta2=0.0)
+    w.params.psi.setValue(0.0)
+    w.params._emit()
+    app.processEvents()
+    quiet = w.plots.subtitle.text()
+    check("при psi = 0 подпись говорит, что опора в нуле шкал",
+          "θ₁ = θ₂ = 0" in quiet and w.plots.subtitle.objectName() == "hint",
+          quiet[-46:])
+
+    w.params.psi.setValue(45.0)
+    w.params._emit()
+    app.processEvents()
+    loud = w.plots.subtitle.text()
+    check("при psi = 45° подпись называет новое место опоры",
+          "+30.00" in loud and "+15.00" in loud, loud[-64:])
+    check("предупреждение о несравнимости показано заметно",
+          "not comparable" in loud and w.plots.subtitle.objectName() == "warn",
+          "стиль %s" % w.plots.subtitle.objectName())
+    r = w.model.result
+    check("кривая не поднимается выше 0 дБ при наклонённом источнике",
+          float(max(r.vs_theta1_db.max(), r.vs_theta2_db.max())) <= 1e-9,
+          "максимум сечений %+.2e дБ" % float(max(r.vs_theta1_db.max(),
+                                                  r.vs_theta2_db.max())))
+    check("проценты считаются от максимума и не превышают 100",
+          r.value_percent <= 100.0 + 1e-9,
+          "%.3f %%" % r.value_percent)
+    # Читаем НАСТОЯЩИЕ подписи блока результата: первая редакция проверки
+    # висела на `hasattr` и зеленела бы при любом их отсутствии
+    shown = [f.text() for f in w.readout._result_fields]
+    check("текстовый блок называет место опоры",
+          any("+30.00" in t and "+15.00" in t for t in shown),
+          "; ".join(t for t in shown if "θ" in t) or str(shown))
+    check("проценты в блоке результата отсчитаны от максимума",
+          any("of the maximum" in t for t in shown),
+          next((t for t in shown if "%" in t), "строки нет"))
+    shot(w, out, "normalised_tilted")
+    w.params.psi.setValue(0.0)
+    w.params._emit()
+    app.processEvents()
+
     # Паспорт прибора (правка 4 хэндоффа 27.08). Числовая часть порядка поиска
     # проверена в `cwapp.selftest`; здесь -- то, что видно только в окне:
     # орган выбора, имя взятого файла в строке состояния и живучесть окна при

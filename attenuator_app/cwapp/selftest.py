@@ -57,7 +57,11 @@ def selfcheck() -> int:                                    # noqa: C901
     _check(res, "M1  значение в точке == прямой вызов ядра",
            abs(r.value_db - want) < 1e-12, "%.6f dB" % r.value_db)
 
-    # M2. Нормировка: в нуле обоих шкал ровно 0 дБ и 100 %.
+    # M2. Нормировка при psi = 0: максимум стоит в нуле обеих шкал, поэтому
+    # там ровно 0 дБ и 100 %. После решения П-2 (опора -- максимум, а не отсчёт
+    # при theta = 0) это уже НЕ определение опоры, а её следствие: проверка
+    # осталась зелёной именно потому, что при неповёрнутом источнике максимум
+    # и нуль шкал совпадают. Случай psi != 0 разбирают M18…M20.
     r0 = m.compute(CwParams(theta1_deg=0.0, theta2_deg=0.0))
     _check(res, "M2  нормировка: (0, 0) даёт 0 дБ и 100 %",
            abs(r0.value_db) < 1e-12 and abs(r0.value_percent - 100.0) < 1e-9,
@@ -228,6 +232,77 @@ def selfcheck() -> int:                                    # noqa: C901
     _check(res, "M17 без паспорта берётся образец и он назван образцом",
            fallback.cal.device_id == "SAMPLE" and "SAMPLE" in fallback.passport_note,
            fallback.passport_note)
+
+    # M18. Нормировка на максимум: НИ ОДНО значение не превышает 0 дБ ни при
+    # каком азимуте источника. До решения П-2 опора стояла в нуле шкал, и при
+    # psi = 45° кривая поднималась до +2.11 дБ, то есть «пропускание 163 %».
+    worst = []
+    for psi in (0.0, 10.0, 20.0, 45.0, -37.0, 90.0):
+        r = m.compute(CwParams(freq_thz=0.9, source="linear", psi_deg=psi,
+                               detector="coherent"))
+        top = max(float(np.max(r.vs_theta1_db)), float(np.max(r.vs_theta2_db)),
+                  r.value_db)
+        worst.append((psi, top))
+    over = [(psi, top) for psi, top in worst if top > 1e-9]
+    _check(res, "M18 нормировка на максимум: выше 0 дБ не поднимается ни при каком psi",
+           not over, "худший подъём %+.2e дБ при psi = %+.0f°"
+           % max(worst, key=lambda t: t[1])[::-1])
+
+    # M19. Максимум ДОСТИГАЕТСЯ, а не только не превышается: при psi = 45°
+    # опора стоит не в нуле шкал, и ровно 0 дБ обязано где-то найтись.
+    p45 = CwParams(freq_thz=0.9, source="linear", psi_deg=45.0,
+                   detector="coherent")
+    m.compute(p45)
+    at = m.reference_at()
+    # ноль ищется В ТОЧКЕ максимума, а не в сечении: сечение идёт при
+    # закреплённом theta2, и через максимум поверхности оно проходит лишь
+    # тогда, когда закреплённый угол сам равен максимуму
+    here = m.compute(p45.with_(theta1_deg=at[0], theta2_deg=at[1])).value_db
+    at_zero = m.compute(p45.with_(theta1_deg=0.0, theta2_deg=0.0)).value_db
+    _check(res, "M19 при psi = 45° опора уехала с нуля шкал и достигается",
+           at is not None and abs(at[0]) > 1.0 and abs(here) < 1e-9 and at_zero < -0.5,
+           "максимум %+.2e дБ в (%+.2f, %+.2f), в нуле шкал %+.3f дБ"
+           % (here, at[0], at[1], at_zero) if at else "опора не найдена")
+
+    # M20. Опора не зависит от того, какие углы выставлены сейчас: она берётся
+    # по всей поверхности. Опора «по текущему сечению» ездила бы вверх-вниз при
+    # каждом движении второго ротатора, и кривая ползала бы сама по себе.
+    p_a = CwParams(freq_thz=0.9, source="linear", psi_deg=30.0,
+                   detector="coherent", theta1_deg=0.0, theta2_deg=0.0)
+    probe = p_a.with_(theta1_deg=12.0, theta2_deg=-3.0)
+    m.compute(p_a)
+    peak_a, val_a = m.reference_at(), m.compute(probe).value_db
+    # заходим в ту же пробную точку издалека: если бы опора считалась по
+    # текущему сечению, показание в одной и той же точке зависело бы от того,
+    # где ротаторы стояли до неё
+    m.compute(p_a.with_(theta1_deg=-70.0, theta2_deg=55.0))
+    peak_b, val_b = m.reference_at(), m.compute(probe).value_db
+    _check(res, "M20 опора не зависит от выставленных углов",
+           peak_a == peak_b and abs(val_a - val_b) < 1e-12,
+           "опора (%+.2f, %+.2f) в обоих случаях, показание в пробной точке "
+           "%+.4f дБ, расхождение %.1e дБ"
+           % (peak_a[0], peak_a[1], val_a, abs(val_a - val_b))
+           if peak_a else "опора не найдена")
+
+    # M21. При psi = 0 новая опора совпадает со старой до последнего знака:
+    # прежние протоколы и опорная точка сверки с CLI не тронуты сменой
+    # конвенции. Старая опора -- прямой вызов ядра в нуле шкал.
+    p0 = CwParams(freq_thz=0.8, theta1_deg=40.0, theta2_deg=0.0, source="linear",
+                  psi_deg=0.0, detector="coherent")
+    r_new = m.compute(p0)
+    cal_old = load_calibration()
+    cal_old.off1_deg = cal_old.off2_deg = 0.0
+    cal_old.source_kind, cal_old.source_psi_deg, cal_old.source_dop = "linear", 0.0, 1.0
+    cal_old.detector_kind, cal_old.detector_axis_deg = "coherent", 0.0
+    met = Metric("single", a=0.8)
+    old_ref = float(attenuation_db_pair(np.array([0.0]), np.array([0.0]),
+                                        cal_old, met, "pmax")[0])
+    old_val = float(attenuation_db_pair(np.array([40.0]), np.array([0.0]),
+                                        cal_old, met, "pmax")[0]) - old_ref
+    _check(res, "M21 при psi = 0 смена опоры не сдвинула ни одного числа",
+           abs(r_new.value_db - old_val) < 1e-12,
+           "%+.4f dB против прежних %+.4f dB (опорная точка CLI -4.77 дБ)"
+           % (r_new.value_db, old_val))
 
     ok, total = sum(res), len(res)
     print("\n=== %d/%d пройдено ===" % (ok, total))

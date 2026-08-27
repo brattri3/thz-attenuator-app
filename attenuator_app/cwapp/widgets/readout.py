@@ -74,7 +74,10 @@ class ReadoutPanel(QtWidgets.QWidget):
         ])
         self._fill(self.results, self._result_fields, [
             ("Attenuation", "%+.3f dB" % result.value_db),
-            ("Transmission", "%.3f %% of the (0, 0) reading" % result.value_percent),
+            ("Transmission", "%.3f %% of the maximum" % result.value_percent),
+            ("Normalised to", "maximum at θ₁ = θ₂ = 0"
+             if result.reference_is_at_zero else
+             "maximum at θ₁ %+.2f°, θ₂ %+.2f°" % result.reference_at),
             ("If θ₁ off by 1°", "%+.3f / %+.3f dB" % result.err_theta1_db),
             ("If θ₂ off by 1°", "%+.3f / %+.3f dB" % result.err_theta2_db),
             ("Combined, ±1° each", "±%.3f dB" % result.combined_error_db),
