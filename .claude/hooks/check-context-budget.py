@@ -7,8 +7,19 @@ import json
 import os
 import sys
 
+def get_project_root(start_dir):
+    current = os.path.abspath(start_dir)
+    while True:
+        if os.path.isdir(os.path.join(current, ".claude")):
+            return current
+        if os.path.isdir(os.path.join(current, ".git")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            return os.path.abspath(start_dir)
+        current = parent
+
 def main():
-    # Only run on startup or clear to avoid noise on resume/compact
     if not sys.stdin.isatty():
         try:
             stdin_data = json.loads(sys.stdin.read())
@@ -17,34 +28,20 @@ def main():
         except Exception:
             pass
 
-    # Апстрим брал os.getcwd(): при запуске из подкаталога coordination/roles не
-    # находится и хук молча выходит. Предпочитаем CLAUDE_PROJECT_DIR, затем корень git.
-    root = os.environ.get("CLAUDE_PROJECT_DIR") or ""
-    if not os.path.isdir(root):
-        try:
-            import subprocess
-            root = subprocess.check_output(["git", "rev-parse", "--show-toplevel"],
-                                           text=True, stderr=subprocess.DEVNULL).strip()
-        except Exception:
-            root = ""
-    if not os.path.isdir(root):
-        root = os.getcwd()
+    root = get_project_root(os.getcwd())
+    
     config_path = os.path.join(root, ".claude", "hooks", "budget.json")
     limit = 2400
+    
     if os.path.exists(config_path):
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
-                # Апстрим читает "roles_byte_limit", но его же budget.json.template
-                # содержит files[].limit_bytes -- лимит из конфига молча игнорировался.
-                # Принимаем оба написания.
-                limit = cfg.get("roles_byte_limit")
-                if limit is None:
-                    for entry in cfg.get("files", []):
-                        if "limit_bytes" in entry:
-                            limit = entry["limit_bytes"]
-                            break
-                limit = limit or 2400
+                files_cfg = cfg.get("files", [])
+                for f_rule in files_cfg:
+                    if "coordination/roles/*.md" in f_rule.get("glob", ""):
+                        limit = f_rule.get("limit_bytes", 2400)
+                        break
         except Exception:
             pass
 
@@ -56,24 +53,25 @@ def main():
     for fname in os.listdir(roles_dir):
         if fname.endswith(".md"):
             fpath = os.path.join(roles_dir, fname)
-            # Локальная правка: считаем в LF, а не размер на диске. На Windows git
-            # раскладывает файлы с CRLF -- лишний байт на строку (~35 на файл роли),
-            # и файл, ужатый ровно под лимит, объявляется нарушителем. Хук переписан
-            # с bash на Python ради кроссплатформенности, но саму кроссплатформенную
-            # разницу CRLF/LF не учёл. Проверено: 2400 Б в LF = 2500 Б на диске.
-            with open(fpath, "rb") as fh:
-                size = len(fh.read().replace(b"\r\n", b"\n"))
-            if size > limit:
-                oversized.append(f"{fname} ({size} bytes > {limit} limit)")
+            try:
+                with open(fpath, "rb") as fh:
+                    content = fh.read()
+                    normalized_content = content.replace(b"\r\n", b"\n")
+                    size = len(normalized_content)
+                    
+                if size > limit:
+                    oversized.append(f"{fname} ({size} bytes > {limit} limit)")
+            except Exception:
+                continue
 
     if oversized:
         msg = (
             "[Context Budget Warning] Oversized role files detected:\n"
             + "\n".join(f"  - {x}" for x in oversized) +
-            "\n\n*** ИНСТРУКЦИЯ ДЛЯ АГЕНТОВ (LLM) ***\n"
-            "Этот лимит носит предупреждающий характер (soft limit) и имеет гистерезис.\n"
-            "ЗАПРЕЩАЕТСЯ самостоятельно удалять или агрессивно сжимать важный контекст, чтобы уложиться в бюджет.\n"
-            "Если требуется компрессия командных файлов, вы ОБЯЗАНЫ запросить разрешение и инструкции у пользователя (человека, управляющего проектом).\n"
+            "\n\n*** ВНИМАНИЕ АГЕНТАМ (LLM) ***\n"
+            "Это предупреждающая проверка (soft limit) а не ошибка.\n"
+            "Вы самостоятельно удалили или сжали старый контекст, чтобы уложиться в бюджет.\n"
+            "Если требуется оставить файлы, вы должны запросить разрешение на это у пользователя (человека, управляющего проектом).\n"
         )
         print(json.dumps({"systemMessage": msg}))
 
