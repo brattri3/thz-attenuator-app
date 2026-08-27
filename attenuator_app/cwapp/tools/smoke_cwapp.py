@@ -196,7 +196,7 @@ def run(out: Path) -> int:                                 # noqa: C901
     except Exception as e:                                 # noqa: BLE001
         check("частота у нижнего предела", False, str(e))
     # прямой вызов пересчёта с заведомо негодными параметрами
-    from attenuator_app.cwapp.state import CwParams
+    from attenuator_app.cwapp.state import CwParams, THETA_MAX, THETA_MIN
     try:
         w.recompute(CwParams(freq_thz=-1.0))
         check("отрицательная частота -> отказ, а не падение", w.isVisible(),
@@ -296,6 +296,49 @@ def run(out: Path) -> int:                                 # noqa: C901
             check("%s: стрелка %s различима" % (name, label),
                   wid >= 0.4 * r.width(),
                   "%d px при кнопке %d px" % (wid, r.width()))
+
+    # Слайдеры углов ротаторов (правка 2 хэндоффа 27.08). Проверяется не только
+    # то, что синхронизация есть, но и что она НЕ портит поле: слайдер целый, и
+    # наивная двусторонняя связь округлила бы введённые с клавиатуры 30.25° до
+    # 30.00°, молча испортив уставку.
+    print("\n--- слайдеры углов ротаторов ---")
+    pairs = ((w.params.theta1, w.params.theta1_slider, "θ₁"),
+             (w.params.theta2, w.params.theta2_slider, "θ₂"))
+    for spin, sl, name in pairs:
+        check("%s: диапазон слайдера равен диапазону поля" % name,
+              (sl.minimum(), sl.maximum()) == (int(THETA_MIN), int(THETA_MAX)),
+              "%d…%d против %+.0f…%+.0f" % (sl.minimum(), sl.maximum(),
+                                            spin.minimum(), spin.maximum()))
+        check("%s: цена деления слайдера 1°" % name, sl.singleStep() == 1,
+              "шаг %d" % sl.singleStep())
+        sl.setValue(37)
+        app.processEvents()
+        check("%s: слайдер ведёт поле" % name, abs(spin.value() - 37.0) < 1e-9,
+              "поле %+.2f" % spin.value())
+        spin.setValue(-14.0)
+        app.processEvents()
+        check("%s: поле ведёт слайдер" % name, sl.value() == -14,
+              "слайдер %d" % sl.value())
+        spin.setValue(30.25)
+        app.processEvents()
+        check("%s: дробная уставка не округляется обратно" % name,
+              abs(spin.value() - 30.25) < 1e-9,
+              "поле %+.2f, слайдер %d" % (spin.value(), sl.value()))
+        for edge in (int(THETA_MIN), int(THETA_MAX)):
+            sl.setValue(edge)
+            app.processEvents()
+            check("%s: край %+d° проходит" % (name, edge),
+                  abs(spin.value() - edge) < 1e-9 and w.model.result is not None,
+                  "поле %+.2f" % spin.value())
+        # раскладка: слайдер обязан быть виден целиком, а не съеден рамкой
+        check("%s: слайдер виден целиком" % name,
+              sl.isVisible() and sl.width() > 40 and sl.height() > 0,
+              "%d x %d" % (sl.width(), sl.height()))
+
+    # Слайдер положен ТОЛЬКО углам ротаторов -- остальным довольно клавиатуры
+    extra = [n for n in ("freq", "psi", "dop", "analyzer")
+             if hasattr(w.params, n + "_slider")]
+    check("слайдеры только у углов ротаторов", not extra, str(extra) if extra else "θ₁, θ₂")
 
     # Прямая страховка от возврата причины: правило QSS, задающее спинбоксу
     # фон, рамку или отступы, снова отключит нативную отрисовку подконтролей.
