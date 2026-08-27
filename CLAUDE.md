@@ -83,6 +83,24 @@ python -m attenuator_app.cw_curve --selftest      # 5/5
    Зоны — `coordination/OWNERSHIP.md`, решения владельца — `QUESTIONS.md`, задания между
    ролями — `HANDOFFS.md` (искать поиском, не читать целиком).
 
+### Инструменты координации
+
+```
+python coordination/tools/status.py                    # сводка в CLI: роли, бэклог, worktree
+python coordination/tools/worktree_launcher.py <роль>  # песочница .worktrees/<роль> на ветке role/<роль>
+python coordination/tools/build_index.py               # пересобрать INDEX.md по журналам
+streamlit run coordination/tools/dashboard/dashboard.py   # UI слежения за работой ролей
+```
+
+Дашборд ставится отдельно: `pip install -r coordination/tools/dashboard/requirements.txt`.
+Он **не только показывает, но и правит** журналы и делает коммиты — работать с ним осознанно,
+как с обычным редактором, а не как со средством просмотра.
+
+⚠ Песочницы. `worktree_launcher.py` заводит рабочее дерево в `.worktrees/<роль>` на ветке
+`role/<роль>`. Каждая песочница — отдельный каталог с полной копией файлов, но **общей** базой
+`.git`: ветка, занятая песочницей, не удаляется, пока каталог существует, и убирать её надо
+`git worktree remove`, а не удалением папки. `.worktrees/` закрыт `.gitignore`.
+
 **Бюджет файлов ролей — мягкий.** Хук `SessionStart` предупреждает при превышении 2400 байт, но
 не блокирует, и выходить за лимит можно, если это обосновано (решение владельца 27.08).
 Обоснование содержательное — живой пункт, число, ловушка; не обоснование — нежелание выносить
