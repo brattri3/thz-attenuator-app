@@ -1,0 +1,14 @@
+{
+  "files": {
+    "__init__.py": "d7154de42ef896ec7dcc767f8b3d61d4e6c8e1bd29dec08c6f79479983a57859",
+    "blanco.py": "a4ae65dd3f387e49e1faa6a19c419af8f9ed5e6874b6d5940199835db2f69638",
+    "forward.py": "75ffeb35c4517d240337463d8999bf1ead926a3b9ca9a36244fd72eb13bc8a3d",
+    "inverse.py": "b8d862649f18b44d67d04dc0817675eced68abd1b06f2d9648ce76c41466d52c",
+    "limits.py": "30c09455d4fdb82cb3e94ef52834749330ec727658da03c7d819d5ed5778074e",
+    "passport.py": "644d1fecede12d2f5a798f87246992eb2410faf0f11ece4a5587bcab4d6ac636",
+    "plots.py": "2202f63eece472f843f77a10b7bc2f2da7a5d76e4bab0e6020229a8ff04f1bc6",
+    "session.py": "dd4907c4478ffb6451f6c20cb0acda318178dfad7b90373c9206fba662b869de",
+    "weights.py": "88bd57f2b02dbc1d0b45d94f5caea2f59784d8f11b4159e3647ed20f7533796b"
+  },
+  "n": 9
+}

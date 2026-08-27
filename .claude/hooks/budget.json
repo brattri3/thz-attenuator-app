@@ -1,0 +1,11 @@
+{
+  "_comment": "Бюджет холодного старта. Единица — байты UTF-8 в LF (см. правку хука: на Windows CRLF добавляет байт на строку). Калибровка под кириллицу: ~2.0 симв/ток, значит 2400 Б ≈ 1200 токенов.",
+  "unit": "bytes",
+  "chars_per_token_calibration": 2.0,
+  "files": [
+    {
+      "glob": "coordination/roles/*.md",
+      "limit_bytes": 2400
+    }
+  ]
+}
