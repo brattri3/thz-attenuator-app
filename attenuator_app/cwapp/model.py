@@ -33,6 +33,10 @@ from attenuator_app.cwapp.state import (                  # noqa: E402
     passport_candidates)
 
 
+#: шаг уточнения максимума в окрестности лучшего узла грубой сетки
+PEAK_FINE_STEP = 0.05
+
+
 def theta_grid() -> np.ndarray:
     """Сетка свипа. Одна на оба сечения -- числа обязаны совпадать."""
     return np.arange(THETA_MIN, THETA_MAX + THETA_STEP / 2.0, THETA_STEP)
@@ -53,6 +57,18 @@ class CwResult:
     #: цена ошибки в 1 градус по каждому углу: (минус, плюс)
     err_theta1_db: tuple[float, float]
     err_theta2_db: tuple[float, float]
+    #: где стоит максимум, к которому нормировано показание (theta1, theta2).
+    #: Окно обязано это показывать: после решения П-2 опора уезжает вместе с
+    #: азимутом источника, и молчать о её положении -- значит выдавать числа,
+    #: которые не с чем сравнить
+    reference_at: tuple[float, float] | None = None
+
+    @property
+    def reference_is_at_zero(self) -> bool:
+        """Совпадает ли опора с нулём обеих шкал ротаторов."""
+        if self.reference_at is None:
+            return True
+        return abs(self.reference_at[0]) < 1e-9 and abs(self.reference_at[1]) < 1e-9
 
     @staticmethod
     def to_percent(db):
@@ -98,6 +114,8 @@ class CwModel:
         lo, hi = self.cal.band_thz
         self.params = params or CwParams(freq_thz=round((lo + hi) / 2.0, 3))
         self._result: CwResult | None = None
+        #: опора нормировки: {ключ конфигурации: (дБ, (theta1, theta2))}
+        self._ref_cache: dict = {}
 
     # -- паспорт прибора -----------------------------------------------
     @staticmethod
@@ -154,14 +172,69 @@ class CwModel:
             self.cal, metric, "pmax"), dtype=float)
 
     def _reference_db(self, metric: Metric) -> float:
-        """Отсчёт при theta1 = theta2 = 0 -- к нему нормируется всё.
+        """Максимум пропускания по обоим углам -- к нему нормируется всё.
 
-        Опора выбирается не оператором (в MVP её нет в интерфейсе): в нуле
-        обоих шкал ровно 0 дБ и 100 %. При наклонённом источнике максимум
-        уезжает с нуля, и кривая может слегка превысить 100 % -- это верное
-        поведение, а не ошибка, шкала окна оставляет запас сверху.
+        Решение владельца П-2 от 2026-08-27: опора -- **максимум кривой**, а не
+        отсчёт при theta1 = theta2 = 0. При повёрнутом источнике максимум
+        уезжает с нуля шкал (при psi = 45° -- на theta1 = +30°, theta2 = +15°),
+        и нормировка на нуль шкал давала «пропускание больше 100 %».
+
+        Цена решения, о которой окно обязано сказать оператору: 0 дБ больше не
+        отвечает нулю шкал и уезжает вместе с psi, поэтому два протокола с
+        разным наклоном источника несравнимы по абсолютной величине.
+
+        Максимум берётся по ПОВЕРХНОСТИ, а не по текущему сечению: опора,
+        зависящая от закреплённого угла, прыгала бы при каждом движении
+        второго ротатора, и кривая ездила бы вверх-вниз сама по себе.
+
+        При psi = 0 максимум лежит ровно в нуле шкал, и новая опора совпадает
+        со старой до последнего знака -- прежние числа и опорная точка сверки
+        с CLI (-4.77 дБ при 40°/0°/0.8 ТГц) не тронуты.
         """
-        return float(self._db([0.0], [0.0], metric)[0])
+        key = (self.cal.source_kind, float(self.cal.source_psi_deg),
+               float(self.cal.source_dop), self.cal.detector_kind,
+               float(self.cal.detector_axis_deg), metric.kind, metric.a, metric.b)
+        hit = self._ref_cache.get(key)
+        if hit is not None:
+            return hit[0]
+        ref, at = self._find_peak(metric)
+        # кэш держит одну запись: конфигурация меняется реже, чем углы, а
+        # движение слайдера углов не должна сопровождать переоценка опоры
+        self._ref_cache = {key: (ref, at)}
+        return ref
+
+    def _find_peak(self, metric: Metric) -> tuple[float, tuple[float, float]]:
+        """Максимум по (theta1, theta2): грубая сетка, затем уточнение.
+
+        Сетка шага свипа стоит около 65 мс на 181x181 -- дешевле, чем кажется,
+        потому что ядро векторное. Уточнение в окрестности лучшего узла даёт
+        меньше 0.001 дБ прибавки, но снимает зависимость опоры от того, попал
+        ли максимум в узел сетки: систематический сдвиг опоры уехал бы во ВСЕ
+        показания разом, и заметить его по одному числу было бы нечем.
+        """
+        th = theta_grid()
+        t1, t2 = np.meshgrid(th, th, indexing="ij")
+        grid = self._db(t1.ravel(), t2.ravel(), metric).reshape(t1.shape)
+        i = np.unravel_index(int(np.argmax(grid)), grid.shape)
+        c1, c2 = float(t1[i]), float(t2[i])
+
+        step = THETA_STEP
+        f1 = np.clip(np.arange(c1 - step, c1 + step + PEAK_FINE_STEP / 2,
+                               PEAK_FINE_STEP), THETA_MIN, THETA_MAX)
+        f2 = np.clip(np.arange(c2 - step, c2 + step + PEAK_FINE_STEP / 2,
+                               PEAK_FINE_STEP), THETA_MIN, THETA_MAX)
+        g1, g2 = np.meshgrid(f1, f2, indexing="ij")
+        fine = self._db(g1.ravel(), g2.ravel(), metric).reshape(g1.shape)
+        j = np.unravel_index(int(np.argmax(fine)), fine.shape)
+        if float(fine[j]) < float(grid[i]):        # уточнение не ухудшает опору
+            return float(grid[i]), (c1, c2)
+        return float(fine[j]), (float(g1[j]), float(g2[j]))
+
+    def reference_at(self) -> tuple[float, float] | None:
+        """Где стоит максимум, к которому нормировано текущее показание."""
+        for ref, at in self._ref_cache.values():
+            return at
+        return None
 
     # -- расчёт --------------------------------------------------------
     def compute(self, params: CwParams | None = None) -> CwResult:
@@ -187,7 +260,8 @@ class CwModel:
 
         self._result = CwResult(params=p, theta=th, vs_theta1_db=vs1,
                                 vs_theta2_db=vs2, value_db=here,
-                                err_theta1_db=e1, err_theta2_db=e2)
+                                err_theta1_db=e1, err_theta2_db=e2,
+                                reference_at=self.reference_at())
         return self._result
 
     @property

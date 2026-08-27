@@ -105,10 +105,11 @@ class PlotPanel(QtWidgets.QWidget):
 
         title = QtWidgets.QLabel("Attenuation vs rotator angles")
         title.setStyleSheet("font-size: 14px; font-weight: 600;")
-        subtitle = QtWidgets.QLabel(
-            "two orthogonal sections through the same surface · "
-            "normalised to the reading at θ₁ = θ₂ = 0")
+        subtitle = QtWidgets.QLabel()
         subtitle.setObjectName("hint")
+        subtitle.setWordWrap(True)
+        self.subtitle = subtitle
+        self._set_subtitle(None)
 
         split = QtWidgets.QSplitter(QtCore.Qt.Vertical)
         split.addWidget(self.top)
@@ -123,6 +124,33 @@ class PlotPanel(QtWidgets.QWidget):
         lay.addWidget(subtitle)
         lay.addWidget(split, 1)
 
+    def _set_subtitle(self, result) -> None:
+        """Подпись под заголовком: где стоит опора и чем это грозит.
+
+        Опора -- максимум по обоим углам (решение владельца П-2 от 27.08). При
+        неповёрнутом источнике максимум лежит в нуле шкал, и подпись читается
+        так же, как раньше. Как только источник наклонён, опора уезжает, и
+        сказать об этом обязательно: 0 дБ перестаёт отвечать нулю шкал, и два
+        протокола с разным азимутом источника несравнимы по абсолютной
+        величине. Молча выдать такие числа -- значит дать оператору сравнить
+        их и получить расхождение из ниоткуда.
+        """
+        head = "two orthogonal sections through the same surface · "
+        if result is None or result.reference_is_at_zero:
+            self.subtitle.setText(head + "0 dB = maximum transmission, "
+                                         "here at θ₁ = θ₂ = 0")
+            self.subtitle.setObjectName("hint")
+        else:
+            t1, t2 = result.reference_at
+            self.subtitle.setText(
+                head + "0 dB = maximum transmission, which the tilted source "
+                "moves to θ₁ %+.2f°, θ₂ %+.2f° — readings are not comparable "
+                "with runs at a different source azimuth" % (t1, t2))
+            self.subtitle.setObjectName("warn")
+        self.subtitle.style().unpolish(self.subtitle)
+        self.subtitle.style().polish(self.subtitle)
+
     def update_from(self, result, units: str) -> None:
         self.top.update_from(result, units)
         self.bottom.update_from(result, units)
+        self._set_subtitle(result)
