@@ -1,6 +1,16 @@
 # Черновик issue в апстрим скилла (DimaMuhannad/multi-agent-coordination-skill)
 
-**Статус: не опубликован.** Публикация — внешнее действие, ждёт прямого разрешения владельца.
+**Статус: публикация разрешена владельцем 27.08, но не выполнена** — в системе нет `gh` и
+токена. Опубликовать можно так:
+
+```
+winget install --id GitHub.cli
+gh auth login
+gh issue create --repo DimaMuhannad/multi-agent-coordination-skill   --title "Dashboard silently misreads non-English journals and commits mutations without confirmation"   --body-file coordination/upstream/issue-dashboard.md
+```
+
+Перед отправкой убрать из тела эту шапку — она внутренняя. Второй путь: вставить текст ниже в
+веб-форму `https://github.com/DimaMuhannad/multi-agent-coordination-skill/issues/new`.
 Заголовок: `Dashboard silently misreads non-English journals and commits mutations without confirmation`
 
 ---
