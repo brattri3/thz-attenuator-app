@@ -22,8 +22,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import shutil
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -39,7 +42,7 @@ try:
 except Exception:                                          # noqa: BLE001
     pass
 
-from PySide6 import QtGui, QtWidgets                       # noqa: E402
+from PySide6 import QtCore, QtGui, QtWidgets               # noqa: E402
 
 from attenuator_app.cwapp import theme                     # noqa: E402
 from attenuator_app.cwapp.mainwindow import CwMainWindow   # noqa: E402
@@ -54,6 +57,45 @@ def check(name: str, ok: bool, note: str = "") -> None:
     print(("  [OK] " if ok else "  [FAIL] ") + name + (("   " + note) if note else ""))
     if not ok:
         FAILURES.append(name)
+
+
+def _spin_buttons(sb):
+    """Прямоугольники стрелок вверх/вниз так, как их считает сам стиль."""
+    opt = QtWidgets.QStyleOptionSpinBox()
+    opt.initFrom(sb)
+    opt.rect = sb.rect()
+    opt.subControls = QtWidgets.QStyle.SC_All
+    opt.buttonSymbols = sb.buttonSymbols()
+    opt.frame = True
+    style = sb.style()
+    return (style.subControlRect(QtWidgets.QStyle.CC_SpinBox, opt,
+                                 QtWidgets.QStyle.SC_SpinBoxUp, sb),
+            style.subControlRect(QtWidgets.QStyle.CC_SpinBox, opt,
+                                 QtWidgets.QStyle.SC_SpinBoxDown, sb))
+
+
+def _click(app, widget, point) -> None:
+    """Настоящий щелчок мышью, а не вызов stepBy: проверяется попадание."""
+    pos = QtCore.QPointF(point)
+    for kind in (QtCore.QEvent.MouseButtonPress, QtCore.QEvent.MouseButtonRelease):
+        QtWidgets.QApplication.sendEvent(widget, QtGui.QMouseEvent(
+            kind, pos, pos, QtCore.Qt.LeftButton, QtCore.Qt.LeftButton,
+            QtCore.Qt.NoModifier))
+    app.processEvents()
+
+
+def _arrow_width(img, rect, pad: int = 3) -> int:
+    """Ширина нарисованной стрелки в пикселях.
+
+    Отступ `pad` отрезает рамку самой кнопки: она есть в обоих случаях и
+    считать её как «стрелка нарисована» нельзя -- на этом первая редакция
+    проверки и промахнулась, дав одинаковые числа до и после правки.
+    """
+    xs = [x
+          for y in range(rect.top() + pad, min(rect.bottom() + 1 - pad, img.height()))
+          for x in range(rect.left() + pad, min(rect.right() + 1 - pad, img.width()))
+          if img.pixelColor(x, y).lightness() < 160]
+    return (max(xs) - min(xs) + 1) if xs else 0
 
 
 def shot(window, out: Path, tag: str) -> None:
@@ -157,7 +199,7 @@ def run(out: Path) -> int:                                 # noqa: C901
     except Exception as e:                                 # noqa: BLE001
         check("частота у нижнего предела", False, str(e))
     # прямой вызов пересчёта с заведомо негодными параметрами
-    from attenuator_app.cwapp.state import CwParams
+    from attenuator_app.cwapp.state import CwParams, THETA_MAX, THETA_MIN
     try:
         w.recompute(CwParams(freq_thz=-1.0))
         check("отрицательная частота -> отказ, а не падение", w.isVisible(),
@@ -226,8 +268,137 @@ def run(out: Path) -> int:                                 # noqa: C901
     check("выбранная радиокнопка видна на пикселях", off != on,
           "одинаковы — индикатор не рисуется" if off == on else "отличается")
 
+    # Стрелки спинбокса. Дефект владельца «не работают кнопки вверх» (правка 1
+    # хэндоффа 27.08) был не в диапазоне и не в обработчике: щелчок исправно
+    # шагал значение, но правило таблицы стилей на QDoubleSpinBox переводило
+    # виджет в разбор QSS целиком, и стрелка ВВЕРХ срезалась по высоте до
+    # чёрточки. Числа этого не видят -- поэтому проверок две: шаг и пиксели.
+    print("\n--- стрелки спинбокса ---")
+    for name in ("theta1", "theta2", "freq", "psi", "analyzer"):
+        sb = getattr(w.params, name)
+        if not sb.isEnabled():
+            continue
+        up, down = _spin_buttons(sb)
+        before = sb.value()
+        _click(app, sb, up.center())
+        stepped_up = sb.value() > before
+        mid = sb.value()
+        _click(app, sb, down.center())
+        stepped_down = sb.value() < mid
+        check("%s: щелчок по стрелке шагает в обе стороны" % name,
+              stepped_up and stepped_down,
+              "вверх %+.3f -> %+.3f, вниз -> %+.3f" % (before, mid, sb.value()))
+        img = sb.grab().toImage()
+        # Стрелка обязана быть РАЗЛИЧИМОЙ, а не просто присутствовать. Нативная
+        # занимает около 2/3 ширины кнопки (10 px из 16), при разборе таблицей
+        # стилей вырождается в 4 px из 20 -- четырёхпиксельная закорючка и
+        # читается оператором как «кнопки нет». Порог в долях ширины кнопки, а
+        # не в пикселях: абсолютный размер зависит от масштаба экрана.
+        for label, r in (("вверх", up), ("вниз", down)):
+            wid = _arrow_width(img, r)
+            check("%s: стрелка %s различима" % (name, label),
+                  wid >= 0.4 * r.width(),
+                  "%d px при кнопке %d px" % (wid, r.width()))
+
+    # Слайдеры углов ротаторов (правка 2 хэндоффа 27.08). Проверяется не только
+    # то, что синхронизация есть, но и что она НЕ портит поле: слайдер целый, и
+    # наивная двусторонняя связь округлила бы введённые с клавиатуры 30.25° до
+    # 30.00°, молча испортив уставку.
+    print("\n--- слайдеры углов ротаторов ---")
+    pairs = ((w.params.theta1, w.params.theta1_slider, "θ₁"),
+             (w.params.theta2, w.params.theta2_slider, "θ₂"))
+    for spin, sl, name in pairs:
+        check("%s: диапазон слайдера равен диапазону поля" % name,
+              (sl.minimum(), sl.maximum()) == (int(THETA_MIN), int(THETA_MAX)),
+              "%d…%d против %+.0f…%+.0f" % (sl.minimum(), sl.maximum(),
+                                            spin.minimum(), spin.maximum()))
+        check("%s: цена деления слайдера 1°" % name, sl.singleStep() == 1,
+              "шаг %d" % sl.singleStep())
+        sl.setValue(37)
+        app.processEvents()
+        check("%s: слайдер ведёт поле" % name, abs(spin.value() - 37.0) < 1e-9,
+              "поле %+.2f" % spin.value())
+        spin.setValue(-14.0)
+        app.processEvents()
+        check("%s: поле ведёт слайдер" % name, sl.value() == -14,
+              "слайдер %d" % sl.value())
+        spin.setValue(30.25)
+        app.processEvents()
+        check("%s: дробная уставка не округляется обратно" % name,
+              abs(spin.value() - 30.25) < 1e-9,
+              "поле %+.2f, слайдер %d" % (spin.value(), sl.value()))
+        for edge in (int(THETA_MIN), int(THETA_MAX)):
+            sl.setValue(edge)
+            app.processEvents()
+            check("%s: край %+d° проходит" % (name, edge),
+                  abs(spin.value() - edge) < 1e-9 and w.model.result is not None,
+                  "поле %+.2f" % spin.value())
+        # раскладка: слайдер обязан быть виден целиком, а не съеден рамкой
+        check("%s: слайдер виден целиком" % name,
+              sl.isVisible() and sl.width() > 40 and sl.height() > 0,
+              "%d x %d" % (sl.width(), sl.height()))
+
+    # Слайдер положен ТОЛЬКО углам ротаторов -- остальным довольно клавиатуры
+    extra = [n for n in ("freq", "psi", "dop", "analyzer")
+             if hasattr(w.params, n + "_slider")]
+    check("слайдеры только у углов ротаторов", not extra, str(extra) if extra else "θ₁, θ₂")
+
+    # Прямая страховка от возврата причины: правило QSS, задающее спинбоксу
+    # фон, рамку или отступы, снова отключит нативную отрисовку подконтролей.
+    styled = [ln for ln in theme.QSS.splitlines()
+              if "QDoubleSpinBox" in ln and "::" not in ln
+              and any(k in ln for k in ("background:", "border:", "padding:"))]
+    check("таблица стилей не забирает отрисовку спинбокса", not styled,
+          styled[0].strip() if styled else "правил нет")
+
+    # Паспорт прибора (правка 4 хэндоффа 27.08). Числовая часть порядка поиска
+    # проверена в `cwapp.selftest`; здесь -- то, что видно только в окне:
+    # орган выбора, имя взятого файла в строке состояния и живучесть окна при
+    # промахе в диалоге.
+    print("\n--- паспорт прибора ---")
+    check("в окне есть орган выбора паспорта",
+          callable(getattr(w, "_choose_passport", None))
+          and w.passport_button.isVisible(),
+          w.passport_button.text())
+    apply(theta1=25.0, theta2=0.0)
+    check("строка состояния называет источник паспорта",
+          "SAMPLE" in w.status.currentMessage(), w.status.currentMessage())
+
+    base = Path(tempfile.mkdtemp())
+    try:
+        src = json.loads((REPO / "attenuator_app" / "tools" / "calibration"
+                          / "SAMPLE.json").read_text(encoding="utf-8"))
+        src["device_id"] = "SMOKE-UNIT"
+        good = base / "device.json"
+        good.write_text(json.dumps(src), encoding="utf-8")
+        bad = base / "wrong.json"
+        bad.write_text('{"hello": 1}', encoding="utf-8")
+
+        before = w.model.result.value_db
+        ok_load = w.load_passport(str(good))
+        app.processEvents()
+        check("выбранный паспорт подхвачен и назван в окне",
+              ok_load and "device.json" in w.status.currentMessage(),
+              w.status.currentMessage())
+        check("параметры оператора пережили смену паспорта",
+              abs(w.params.theta1.value() - 25.0) < 1e-9,
+              "θ₁ %+.2f" % w.params.theta1.value())
+
+        bad_load = w.load_passport(str(bad))
+        app.processEvents()
+        check("негодный файл отвергнут вслух, окно живо",
+              (not bad_load) and w.isVisible()
+              and "rejected" in w.status.currentMessage(),
+              w.status.currentMessage()[:60])
+        check("после отказа остался прежний паспорт, а не образец",
+              w.model.passport_path.name == "device.json",
+              w.model.passport_path.name)
+        shot(w, out, "passport")
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
     print("\n########## ИТОГ ##########")
-    print("  снимков: %d, каталог %s" % (n + 2, out))
+    print("  снимков: %d, каталог %s" % (n + 3, out))
     if FAILURES:
         print("  ОТКАЗОВ: %d" % len(FAILURES))
         for f in FAILURES:

@@ -13,7 +13,10 @@
 """
 from __future__ import annotations
 
+import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -27,7 +30,7 @@ from attenuator_app.tools.service_calc import (           # noqa: E402
     Metric, attenuation_db_pair, load_calibration)
 from attenuator_app.cwapp.model import CwModel, CwResult, theta_grid   # noqa: E402
 from attenuator_app.cwapp.state import (                  # noqa: E402
-    CwParams, disabled_reason, enabled_fields)
+    CwParams, disabled_reason, enabled_fields, passport_candidates, program_dir)
 
 
 def _check(res: list, name: str, ok: bool, note: str = "") -> None:
@@ -158,6 +161,73 @@ def selfcheck() -> int:                                    # noqa: C901
     _check(res, "M12 частота вне полосы помечается как экстраполяция",
            out_of_band is not None and in_band is None,
            (out_of_band or "").split(" — ")[0])
+
+    # M13. Порядок поиска паспорта: явный выбор идёт первым, дальше каталог
+    # рядом с программой -- сначала подкаталог `passports/`, затем сам каталог.
+    base = Path(tempfile.mkdtemp())
+    try:
+        (base / "passports").mkdir()
+        (base / "passports" / "b.json").write_text("{}", encoding="utf-8")
+        (base / "a.json").write_text("{}", encoding="utf-8")
+        order = [c.name for c in passport_candidates("explicit.json", base=base)]
+        _check(res, "M13 порядок поиска паспорта: явный, passports/, рядом",
+               order == ["explicit.json", "b.json", "a.json"], str(order))
+
+        # M14. Ловушка PyInstaller. «Рядом с программой» под сборкой -- это
+        # каталог `sys.executable`, а НЕ каталог `__file__`: последний
+        # указывает во временный `_MEIPASS`, паспорт оператора там не лежит
+        # никогда, и приложение молча считает по зашитому образцу. Из
+        # исходников дефект не проявляется вовсе -- отсюда поддельный frozen.
+        meipass = Path(tempfile.mkdtemp())
+        sys.frozen = True                                  # как под PyInstaller
+        exe_before = sys.executable
+        sys.executable = str(base / "cwapp.exe")
+        try:
+            frozen_dir = program_dir()
+            frozen_seen = [c.name for c in passport_candidates()]
+        finally:
+            sys.executable = exe_before
+            del sys.frozen
+            shutil.rmtree(meipass, ignore_errors=True)
+        _check(res, "M14 «рядом с программой» под сборкой -- каталог .exe, не _MEIPASS",
+               frozen_dir == base and frozen_seen == ["b.json", "a.json"],
+               "%s -> %s" % (frozen_dir.name, frozen_seen))
+
+        # M15. Явно выбранный негодный файл отказывает ГРОМКО, а найденный
+        # рядом -- пропускается. Тихая подмена выбранного паспорта образцом
+        # даёт неверные числа при внешне исправном окне.
+        wrong = base / "wrong.json"
+        wrong.write_text('{"hello": 1}', encoding="utf-8")
+        try:
+            CwModel(wrong)
+            loud = False
+        except ValueError:
+            loud = True
+        quiet = CwModel(calibration_path=None)
+        _check(res, "M15 явный негодный паспорт -- отказ, найденный рядом -- пропуск",
+               loud and quiet.cal.device_id == "SAMPLE",
+               "отказ: %s, без выбора: %s" % (loud, quiet.cal.device_id))
+
+        # M16. Годный паспорт рядом с программой действительно берётся, и в
+        # строке состояния видно, какой файл взят.
+        cal_src = json.loads((REPO / "attenuator_app" / "tools" / "calibration"
+                              / "SAMPLE.json").read_text(encoding="utf-8"))
+        cal_src["device_id"] = "UNIT-TEST"
+        chosen = base / "unit.json"
+        chosen.write_text(json.dumps(cal_src), encoding="utf-8")
+        m4 = CwModel(chosen)
+        _check(res, "M16 выбранный паспорт взят и назван в строке состояния",
+               m4.cal.device_id == "UNIT-TEST" and "unit.json" in m4.device_line(),
+               m4.device_line())
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+    # M17. Зашитый образец -- последний рубеж, и он назван образцом вслух:
+    # на нём можно считать, но нельзя измерять.
+    fallback = CwModel()
+    _check(res, "M17 без паспорта берётся образец и он назван образцом",
+           fallback.cal.device_id == "SAMPLE" and "SAMPLE" in fallback.passport_note,
+           fallback.passport_note)
 
     ok, total = sum(res), len(res)
     print("\n=== %d/%d пройдено ===" % (ok, total))

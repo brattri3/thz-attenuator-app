@@ -49,6 +49,16 @@ FONT_MONO = "Cascadia Mono"
 # неотличим от невыбранного -- кружок просто пропадает. Поймано на снимке
 # дымового прогона 2026-08-27. Шрифт задаётся объектом приложения
 # (`configure_fonts`), а фон -- поимённо тем контейнерам, которым он нужен.
+#
+# По той же причине здесь НЕТ правила, задающего QDoubleSpinBox фон, рамку или
+# отступы. Такое правило переводит спинбокс в разбор таблицей стилей целиком,
+# и стрелки подконтролей `::up-button`/`::down-button` считаются по коробке
+# QSS: стрелка ВВЕРХ срезается по высоте до чёрточки и выглядит нерабочей,
+# хотя щелчок по ней исправно шагает значение. Владелец так и прочитал --
+# «не работают кнопки вверх» (хэндофф 27.08, правка 1). Задать подконтроли
+# явно тоже нельзя: без `image:` Qt не рисует стрелки вовсе. Единственный
+# рабочий вариант -- оставить спинбокс нативному стилю; заодно он сам красит
+# стрелку серым, когда значение упёрлось в границу диапазона.
 QSS = """
 QMainWindow, QScrollArea, QScrollArea > QWidget > QWidget, QStatusBar {
     background: %(panel)s; }
@@ -59,9 +69,9 @@ QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px;
 QLabel#hint { color: %(muted)s; font-size: 11px; }
 QLabel#warn { color: %(warn)s; font-size: 11px; }
 QLabel:disabled { color: %(muted)s; }
-QDoubleSpinBox, QLineEdit, QComboBox { background: #ffffff; border: 1px solid %(axis)s;
-                                       border-radius: 2px; padding: 3px 4px; }
-QDoubleSpinBox:disabled { color: %(muted)s; background: %(panel)s; }
+QLineEdit, QComboBox { background: #ffffff; border: 1px solid %(axis)s;
+                       border-radius: 2px; padding: 3px 4px; }
+QDoubleSpinBox:disabled { color: %(muted)s; }
 QPushButton { background: %(panel)s; border: 1px solid %(axis)s; border-radius: 2px;
               padding: 5px 12px; }
 QPushButton:hover { background: #ecebe6; }

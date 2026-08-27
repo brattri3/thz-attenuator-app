@@ -61,6 +61,14 @@ class CwMainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(central)
 
         self.status = self.statusBar()
+        self.passport_button = QtWidgets.QPushButton("Passport…")
+        self.passport_button.setFlat(True)
+        self.passport_button.setToolTip(
+            "Choose the passport file of your device. Without an explicit choice "
+            "the application looks next to the executable and falls back to the "
+            "built-in sample.")
+        self.passport_button.clicked.connect(self._choose_passport)
+        self.status.addPermanentWidget(self.passport_button)
         self.update_button = QtWidgets.QPushButton("Check for updates")
         self.update_button.setFlat(True)
         self.update_button.clicked.connect(self._check_updates)
@@ -86,6 +94,35 @@ class CwMainWindow(QtWidgets.QMainWindow):
         self.readout.update_from(result)
         self.params.set_band_hint(self.model.band_warning())
         self.status.showMessage("%s · v%s" % (self.model.device_line(), __version__))
+
+    # -- паспорт прибора -----------------------------------------------
+    def _choose_passport(self) -> None:
+        """Явный выбор файла -- первая ступень порядка поиска.
+
+        Негодный файл не роняет окно и не заменяет собой рабочую модель:
+        прежний паспорт остаётся на месте, причина уходит в строку состояния.
+        Иначе один промах в диалоге оставил бы оператора без расчёта посреди
+        серии измерений.
+        """
+        start = str(self.model.passport_path.parent)
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Choose device passport", start, "Passport files (*.json)")
+        if not path:
+            return
+        self.load_passport(path)
+
+    def load_passport(self, path) -> bool:
+        """Перечитать паспорт, сохранив введённые оператором параметры."""
+        try:
+            model = CwModel(path, params=self.model.params)
+        except Exception as e:                             # noqa: BLE001
+            self.status.setStyleSheet("color: %s;" % theme.STATUS["critical"])
+            self.status.showMessage("passport %s rejected: %s"
+                                    % (Path(path).name, e))
+            return False
+        self.model = model
+        self.recompute(self.params.value())
+        return True
 
     # -- обновления -----------------------------------------------------
     def _check_updates(self) -> None:

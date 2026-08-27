@@ -53,6 +53,7 @@ class ParamsPanel(QtWidgets.QScrollArea):
     def __init__(self, params: CwParams, parent=None):
         super().__init__(parent)
         self._loading = True          # защита от рекурсии сигналов
+        self._syncing = False         # поле <-> слайдер, чтобы не зациклиться
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
 
@@ -153,8 +154,64 @@ class ParamsPanel(QtWidgets.QScrollArea):
         r1, _ = self._row("θ₁  first grid", self.theta1)
         r2, _ = self._row("θ₂  second grid", self.theta2)
         form.addWidget(r1)
+        self.theta1_slider = self._slider(self.theta1)
+        form.addWidget(self.theta1_slider.holder)
         form.addWidget(r2)
+        self.theta2_slider = self._slider(self.theta2)
+        form.addWidget(self.theta2_slider.holder)
         return box
+
+    def _slider(self, spin):
+        """Слайдер-дублёр поля угла ротатора, шаг 1° -- как у поля.
+
+        Только углам ротаторов (решение владельца 27.08): крутить мышью
+        осмысленно то, что оператор и правда крутит руками, а частоту или
+        степень поляризации задают числом.
+
+        Слайдер целочисленный: 1° -- цена деления и на нём, и на поле. Поле
+        при этом остаётся точнее слайдера, и дробное значение, введённое с
+        клавиатуры, обратной синхронизацией не затирается -- слайдер лишь
+        встаёт на ближайший градус. Отсюда `_syncing`: без него округление
+        поехало бы обратно в поле и 30.25° превратились бы в 30.00°.
+        """
+        sl = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        sl.setRange(int(round(spin.minimum())), int(round(spin.maximum())))
+        sl.setSingleStep(1)
+        sl.setPageStep(10)
+        sl.setTickPosition(QtWidgets.QSlider.TicksBelow)
+        sl.setTickInterval(15)
+        sl.setValue(int(round(spin.value())))
+
+        def from_slider(v):
+            if self._syncing:
+                return
+            self._syncing = True
+            try:
+                spin.setValue(float(v))
+            finally:
+                self._syncing = False
+
+        def to_slider(v):
+            if self._syncing:
+                return
+            self._syncing = True
+            try:
+                sl.setValue(int(round(v)))
+            finally:
+                self._syncing = False
+
+        sl.valueChanged.connect(from_slider)
+        spin.valueChanged.connect(to_slider)
+
+        # отступ слева ровно на ширину метки строки: иначе слайдер висит между
+        # двумя полями и непонятно, к какому из них он относится
+        holder = QtWidgets.QWidget()
+        h = QtWidgets.QHBoxLayout(holder)
+        h.setContentsMargins(86, 0, 0, 0)
+        h.setSpacing(0)
+        h.addWidget(sl)
+        sl.holder = holder
+        return sl
 
     def _build_frequency(self, p):
         box, form = self._group("Frequency")
