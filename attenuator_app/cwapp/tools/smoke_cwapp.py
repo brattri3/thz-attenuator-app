@@ -54,12 +54,41 @@ REQUIRED = ("recompute", "_check_updates", "show_update_answer", "load_passport"
 json_status_ok = 200
 
 FAILURES: list[str] = []
+SKIPPED: list[str] = []
 
 
 def check(name: str, ok: bool, note: str = "") -> None:
     print(("  [OK] " if ok else "  [FAIL] ") + name + (("   " + note) if note else ""))
     if not ok:
         FAILURES.append(name)
+
+
+def skip(name: str, why: str) -> None:
+    """Проверка не выполнялась -- и это сказано вслух, а не молча.
+
+    Молчаливый пропуск хуже ложного отказа: следующий читатель решит, что
+    проверка прошла. Поэтому пропуск печатается своей меткой и попадает в
+    итог отдельной строкой.
+    """
+    print("  [--] " + name + "   ПРОПУЩЕНА: " + why)
+    SKIPPED.append(name)
+
+
+def native_painting_available() -> tuple[bool, str]:
+    """Рисует ли текущая платформа нативные подконтроли.
+
+    Платформа offscreen не рисует стрелки спинбокса вовсе: там нет ни системной
+    темы, ни шрифтов. Пиксельные проверки нативной отрисовки под ней дают 0 px
+    при кнопке 14 px -- РОВНО ту картину, которой описан настоящий дефект
+    правки 1 («вырождается в 4 px из 20»). Прогон по умолчанию показывал
+    поломку, которой нет: следующий либо пошёл бы чинить исправное, либо
+    привык к красному и пропустил бы настоящий возврат.
+    """
+    name = os.environ.get("QT_QPA_PLATFORM", "")
+    if name == "offscreen":
+        return False, ("платформа offscreen не рисует нативные стрелки; "
+                       "для этой группы запустите QT_QPA_PLATFORM=windows")
+    return True, ""
 
 
 def _spin_buttons(sb):
@@ -277,6 +306,7 @@ def run(out: Path) -> int:                                 # noqa: C901
     # виджет в разбор QSS целиком, и стрелка ВВЕРХ срезалась по высоте до
     # чёрточки. Числа этого не видят -- поэтому проверок две: шаг и пиксели.
     print("\n--- стрелки спинбокса ---")
+    native_ok, native_why = native_painting_available()
     for name in ("theta1", "theta2", "freq", "psi", "analyzer"):
         sb = getattr(w.params, name)
         if not sb.isEnabled():
@@ -291,6 +321,9 @@ def run(out: Path) -> int:                                 # noqa: C901
         check("%s: щелчок по стрелке шагает в обе стороны" % name,
               stepped_up and stepped_down,
               "вверх %+.3f -> %+.3f, вниз -> %+.3f" % (before, mid, sb.value()))
+        if not native_ok:
+            skip("%s: стрелки различимы (пиксели)" % name, native_why)
+            continue
         img = sb.grab().toImage()
         # Стрелка обязана быть РАЗЛИЧИМОЙ, а не просто присутствовать. Нативная
         # занимает около 2/3 ширины кнопки (10 px из 16), при разборе таблицей
@@ -443,6 +476,22 @@ def run(out: Path) -> int:                                 # noqa: C901
         check("после отказа остался прежний паспорт, а не образец",
               w.model.passport_path.name == "device.json",
               w.model.passport_path.name)
+
+        # Конвенция имени (П-5 от 28.08) -- в окне видно, что счёт идёт по
+        # device_id, а имя файла с ним разошлось
+        named = base / "SMOKE-UNIT.json"
+        named.write_text(json.dumps(src), encoding="utf-8")
+        w.load_passport(str(named))
+        app.processEvents()
+        check("имя по конвенции -- окно молчит про расхождение",
+              "≠" not in w.status.currentMessage(), w.status.currentMessage())
+        w.load_passport(str(good))          # device.json при device_id SMOKE-UNIT
+        app.processEvents()
+        check("имя вразрез с device_id -- окно предупреждает, счёт продолжается",
+              "≠" in w.status.currentMessage()
+              and "SMOKE-UNIT" in w.status.currentMessage()
+              and w.model.result is not None,
+              w.status.currentMessage())
         shot(w, out, "passport")
     finally:
         shutil.rmtree(base, ignore_errors=True)
@@ -493,10 +542,16 @@ def run(out: Path) -> int:                                 # noqa: C901
 
     print("\n########## ИТОГ ##########")
     print("  снимков: %d, каталог %s" % (n + 3, out))
+    if SKIPPED:
+        print("  пропущено: %d (не отказ -- см. строки [--] выше)" % len(SKIPPED))
+        for name in SKIPPED:
+            print("   ~ " + name)
     if FAILURES:
         print("  ОТКАЗОВ: %d" % len(FAILURES))
         for f in FAILURES:
             print("   - " + f)
+    elif SKIPPED:
+        print("  выполненное -- зелёное")
     else:
         print("  всё зелёное")
     w.close()
