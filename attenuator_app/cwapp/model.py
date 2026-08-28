@@ -145,6 +145,14 @@ class CwModel:
                 skipped.append("%s (%s)" % (path.name, type(e).__name__))
                 continue
             note = "passport %s" % path.name
+            # Имя файла обязано совпадать с device_id (конвенция П-5 от
+            # 28.08). Расхождение НЕ останавливает расчёт -- device_id лежит
+            # внутри файла и главнее имени, -- но и молчать о нём нельзя:
+            # оператор, положивший рядом файл с чужим именем, должен видеть,
+            # по какому прибору на самом деле идёт счёт.
+            expected = str(getattr(cal, "device_id", "") or "")
+            if expected and path.stem != expected:
+                note += " · file name ≠ device_id, counting as %s" % expected
             if skipped:
                 note += " · skipped %s" % ", ".join(skipped)
             return cal, path, note

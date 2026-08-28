@@ -370,6 +370,54 @@ def selfcheck() -> int:                                    # noqa: C901
     _check(res, "M27 разбор обновлений живёт без Qt", not qt_in_updates,
            str(qt_in_updates) if qt_in_updates else "чисто")
 
+    # M28. Конвенция имени паспорта (П-5 от 28.08): имя файла совпадает с
+    # device_id. Совпало -- в строке состояния ни слова лишнего; разошлось --
+    # предупреждение, но расчёт идёт по device_id, потому что он внутри файла
+    # и главнее имени. Молчаливая подмена прибора недопустима, остановка
+    # расчёта из-за имени -- тоже: оператор остался бы без чисел посреди серии.
+    base = Path(tempfile.mkdtemp())
+    try:
+        cal_src = json.loads((REPO / "attenuator_app" / "tools" / "calibration"
+                              / "SAMPLE.json").read_text(encoding="utf-8"))
+        cal_src["device_id"] = "ATT-11-16-CA85-0042"
+        right = base / "ATT-11-16-CA85-0042.json"
+        right.write_text(json.dumps(cal_src), encoding="utf-8")
+        wrong = base / "kalibrovka-avgust.json"
+        wrong.write_text(json.dumps(cal_src), encoding="utf-8")
+
+        m_ok = CwModel(right)
+        quiet = "≠" not in m_ok.device_line()
+        _check(res, "M28 имя по конвенции -- в строке состояния ни слова лишнего",
+               quiet and m_ok.cal.device_id == "ATT-11-16-CA85-0042",
+               m_ok.device_line())
+
+        m_bad = CwModel(wrong)
+        line = m_bad.device_line()
+        _check(res, "M29 имя вразрез с device_id -- предупреждение, счёт по device_id",
+               "≠" in line and "ATT-11-16-CA85-0042" in line
+               and m_bad.cal.device_id == "ATT-11-16-CA85-0042"
+               and m_bad.compute(CwParams(freq_thz=0.9)) is not None,
+               line)
+
+        # M30. Ловушка, ради которой дата запрещена в имени: два паспорта
+        # одного прибора с датами в именах -- и берётся лексикографически
+        # первый, то есть СТАРАЯ калибровка, молча.
+        dated = Path(tempfile.mkdtemp())
+        old_cal = dict(cal_src, calibration_dataset="march")
+        new_cal = dict(cal_src, calibration_dataset="august")
+        (dated / "ATT-11-16-CA85-0042-2026-03-11.json").write_text(
+            json.dumps(old_cal), encoding="utf-8")
+        (dated / "ATT-11-16-CA85-0042-2026-08-14.json").write_text(
+            json.dumps(new_cal), encoding="utf-8")
+        first = passport_candidates(base=dated)[0]
+        picked_old = "2026-03-11" in first.name
+        _check(res, "M30 даты в именах дают молчаливый выбор старой калибровки",
+               picked_old, "взялся бы %s -- потому дата в имени и запрещена"
+               % first.name)
+        shutil.rmtree(dated, ignore_errors=True)
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
     ok, total = sum(res), len(res)
     print("\n=== %d/%d пройдено ===" % (ok, total))
     return 0 if ok == total else 1
