@@ -38,7 +38,7 @@ individual unit.
 **File naming — one rule:**
 
 ```
-<model>-<serial number>.json        for example  ATT-11-16-CA85-02721.json
+<model>-<serial number>.json        for example  ATT-11-16-CA85-0042.json
 ```
 
 The file name must match the `device_id` inside the file, character for character. One instrument —
