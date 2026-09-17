@@ -53,6 +53,12 @@ handoff.
   after every commit and reports back when trailers didn't parse, do it — a rule enforced by a
   hook stays true; a rule that only lives in this document rots the moment nobody's checking.
 - Commit **only your own paths** — no blind `git add -A`.
+- **`git fetch` before you say anything about `origin`.** A remote-tracking ref is a cache and can
+  predate a push that already landed — including one made by another role's worktree on this same
+  machine. Never read `origin/<branch>` and report "unpushed commits" or divergence without
+  refreshing it first: `git fetch origin <branch>` — then, and only then, compare. A false
+  diagnosis here is what provokes an unnecessary re-push or force-push against a problem that
+  doesn't exist (upstream `CHARTER.md`, adopted 2026-09-17).
 - `git push` — **only with the owner's direct permission**. Never force-push or rewrite history.
 - A shared-file conflict on `main` → don't force it, call the orchestrator.
 - Don't reference commit hashes in coordination docs — link by date + file instead (hashes churn

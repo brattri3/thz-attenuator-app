@@ -52,3 +52,9 @@ explicitly, and note per-environment quirks (what each one can and can't see, wh
 vs. persistent). The important invariant: **coordination between environments happens through
 git** — pull before working, push after the owner clears it. No live-process mechanism sees
 across environments; don't assume one exists just because it exists within one environment.
+
+If any environment is air-gapped (no outbound internet — a shielded lab, an on-prem industrial
+network, a cleanroom), say so here too. A role asked to integrate an external API or CDN should
+default to an offline-capable mock or heuristic first, with the real network call added as a
+separate, clearly-marked tier — not assume connectivity and find out otherwise at deploy time in
+the one environment where that's expensive to unwind.

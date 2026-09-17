@@ -1,2 +1,7 @@
-streamlit
-pytest
+# Runtime dependency for the OPTIONAL dashboard add-on. The core scaffold
+# (build_index.py, kpi_git.py, coordlib) is stdlib-only and needs none of this.
+#
+# The floor is what the code actually calls: st.container(border=True) needs 1.29,
+# st.toggle needs 1.31. Neither was enforced before, so an older Streamlit failed at
+# runtime rather than at install time.
+streamlit>=1.31

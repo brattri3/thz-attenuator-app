@@ -1,8 +1,11 @@
 {
-  "_comment": "Cold-start budget. Unit is UTF-8 bytes (wc -c), not Unicode codepoints and not tokens. Calibrate bytes-per-token for YOUR content once: pick a representative roles/<ID>.md file, run `wc -c` on it, and compare against what your model/tooling reports as its token count for the same text (Claude Code's /context, or any tokenizer). Don't assume 4 chars/token — that number drifts a lot with language (Cyrillic/CJK cost more bytes per token than Latin) and with how much of the file is code/tables vs prose. limit_bytes below assumes a target of roughly 1200 tokens; adjust both the calibration and the limit for your project.",
+  "_comment": "Cold-start budget. Unit is UTF-8 bytes (wc -c), not Unicode codepoints and not tokens. Calibrate bytes-per-token for YOUR content once: pick a representative roles/<ID>.md file, run `wc -c` on it, and compare against what your model/tooling reports as its token count for the same text (Claude Code's /context, or any tokenizer). Don't assume 4 chars/token — that number drifts a lot with language (Cyrillic/CJK cost more bytes per token than Latin) and with how much of the file is code/tables vs prose. limit_bytes for the role files assumes a target of roughly 1200 tokens AT ROUGHLY 2 BYTES PER TOKEN OF LATIN PROSE. Worked example for the other case, because the default is wrong for it and a warning that is wrong every time trains every role to ignore the hook: Cyrillic prose costs closer to 4 bytes per token in UTF-8, so the same 1200-token target is about 4800 bytes, not 2400. CJK is higher still. Measure yours as described above and raise this number to match -- a project that drops this file instead also loses the CLAUDE.md/AGENTS.md limits below, which are not language-dependent at all.",
+  "_comment_instruction_files": "The CLAUDE.md and AGENTS.md limits are NOT ours to pick — they mirror Claude Code's published thresholds: target under 200 lines per instruction file, and a file over 4 MiB is skipped entirely rather than truncated. The 4 MiB skip is silent, which is the dangerous one: the instruction file that grew too large simply stops being read, and nothing says so. Warning at the documented line target gets you a signal long before that cliff.",
   "unit": "bytes",
   "chars_per_token_calibration": "MEASURE_YOUR_OWN — see _comment",
   "files": [
-    { "glob": "coordination/roles/*.md", "limit_bytes": 2400 }
+    { "glob": "coordination/roles/*.md", "limit_bytes": 2400 },
+    { "glob": "CLAUDE.md", "limit_lines": 200, "limit_bytes": 4194304 },
+    { "glob": "AGENTS.md", "limit_lines": 200, "limit_bytes": 4194304 }
   ]
 }

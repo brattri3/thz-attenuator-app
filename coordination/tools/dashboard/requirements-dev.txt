@@ -1,0 +1,6 @@
+# Test-only. pytest used to be listed as a runtime dependency of the dashboard.
+#
+# Note the protocol suite (parser, coordlib, hooks, tools) runs with pytest alone --
+# streamlit is only needed for the UI tests, which skip cleanly without it:
+#     python -m pytest -m "not streamlit"
+pytest>=7.0

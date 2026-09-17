@@ -108,23 +108,39 @@ def test_parse_board_canonical(mock_git_repo):
     assert auditor["date"] == "2026-08-20"
 
 
-def test_parse_board_unicode_cyrillic(unicode_markdown_files):
-    board_file = unicode_markdown_files["board_file"]
-    roles = parse_board(board_file)
+def test_parse_board_cyrillic_headers_are_refused_with_a_diagnostic(unicode_markdown_files):
+    """Translated table headers are no longer half-supported.
 
-    assert len(roles) == 3
-    assert roles[0]["role"] == "архитектор"
-    assert roles[0]["status"] == "active"
+    They used to parse, while translated status VALUES were simultaneously classified as
+    closed - so a Russian board rendered rows that were all silently counted inactive.
+    Accepting one half and silently mis-reading the other is the trap rationale.md is about.
+    """
+    diagnostics = []
+    roles = parse_board(unicode_markdown_files["board_file"], diagnostics=diagnostics)
+
+    assert roles == []
+    assert any(d.code == "unknown-table-schema" for d in diagnostics)
+    # The message must name what it actually saw, so the fix is obvious from the report.
+    assert any("Роль" in d.observed for d in diagnostics)
+
+
+def test_parse_board_accepts_russian_content_under_canonical_headers(russian_content_files):
+    """Prose in the project's language keeps working - only the protocol tokens are English."""
+    diagnostics = []
+    roles = parse_board(russian_content_files["board_file"], diagnostics=diagnostics)
+
+    assert [r["role"] for r in roles] == ["архитектор", "тестировщик"]
+    assert roles[0]["status_known"] == "active"
     assert roles[0]["date"] == "2026-08-27"
-    assert "Разработка архитектуры" in roles[0]["summary"]
     assert "📐" in roles[0]["summary"]
+    assert diagnostics == []
 
-    assert roles[1]["role"] == "разработчик"
-    assert "🚀" in roles[1]["summary"]
 
-    assert roles[2]["role"] == "тестировщик"
-    assert roles[2]["status"] == "idle"
-
+def test_parse_board_russian_status_value_is_flagged_not_silently_dropped(russian_schema_files):
+    """A translated status must be reported, never quietly treated as some other state."""
+    diagnostics = []
+    parse_board(russian_schema_files["board_file"], diagnostics=diagnostics)
+    assert diagnostics, "a Russian board must not parse silently"
 
 def test_parse_board_status_without_date(tmp_path):
     board_content = (
@@ -190,24 +206,36 @@ def test_parse_questions_canonical(mock_git_repo):
     assert "cat | grep" in q4["question"]
 
 
-def test_parse_questions_unicode_cyrillic(unicode_markdown_files):
-    q_file = unicode_markdown_files["questions_file"]
-    questions = parse_questions(q_file)
+def test_parse_questions_cyrillic_headers_are_refused_with_a_diagnostic(unicode_markdown_files):
+    diagnostics = []
+    questions = parse_questions(unicode_markdown_files["questions_file"], diagnostics=diagnostics)
 
-    assert len(questions) == 3
-    assert questions[0]["id"] == "Q-1"
+    assert questions == []
+    assert any(d.code == "unknown-table-schema" for d in diagnostics)
+
+
+def test_parse_questions_accepts_russian_content_under_canonical_headers(russian_content_files):
+    diagnostics = []
+    questions = parse_questions(russian_content_files["questions_file"], diagnostics=diagnostics)
+
+    assert [q["id"] for q in questions] == ["Q-1", "Q-2", "Q-3"]
     assert "UTF-8 и эмодзи 🚀" in questions[0]["question"]
     assert questions[0]["is_open"] is True
     assert questions[0]["is_blocking"] is True
-
-    assert questions[1]["id"] == "Q-2"
-    assert r"$\int_0^1 x^2 dx = \frac{1}{3}$" in questions[1]["question"]
-    assert questions[1]["status"] == "resolved"
     assert questions[1]["is_open"] is False
+    assert "cat | grep" in questions[2]["question"], "escaped pipe must survive"
+    assert diagnostics == []
 
-    assert questions[2]["id"] == "Q-3"
-    assert "cat | grep" in questions[2]["question"]
 
+def test_russian_question_status_is_unclassified_not_resolved(russian_schema_files):
+    """The headline symptom of issue #6: "Open Questions: 0" on a Russian journal.
+
+    `открыт` must come back as None (unclassified) with a diagnostic - never as False,
+    which is indistinguishable from a genuinely resolved question.
+    """
+    diagnostics = []
+    parse_questions(russian_schema_files["questions_file"], diagnostics=diagnostics)
+    assert any(d.code in ("unknown-table-schema", "unknown-status") for d in diagnostics)
 
 def test_parse_questions_nonexistent_file(tmp_path):
     nonexistent = tmp_path / "NONEXISTENT_QUESTIONS.md"

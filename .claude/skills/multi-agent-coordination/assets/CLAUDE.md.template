@@ -1,77 +1,85 @@
-# CLAUDE.md — \<PROJECT NAME\>
+@AGENTS.md
 
-One or two sentences: what this project is, what its core artifact/output is.
+<!-- Everything vendor-neutral lives in AGENTS.md; this file adds only what is specific to
+     Claude Code. The split is deliberate, and the import direction is not a matter of taste:
+     Claude Code reads CLAUDE.md and does NOT read AGENTS.md, so without the line above,
+     nothing in AGENTS.md reaches the session. A symlink (`ln -s AGENTS.md CLAUDE.md`) works
+     too when you have nothing Claude-specific to add, but it needs Administrator privileges
+     or Developer Mode on Windows, so the import is the portable choice.
 
-Documentation and commit language: **\<LANGUAGE\>**.
+     Imports resolve relative to the file containing them, are expanded at launch, and nest up
+     to four hops deep. Keep this file short: it and AGENTS.md both count against the same
+     context budget, and Claude Code's own guidance is to target under 200 lines per
+     instruction file. -->
 
-## Your start
+# Claude Code
 
-Several role-sessions share this repository (\<list role IDs\> + orchestrator `ORCH`).
+## Naming this session
 
 1. Name your session: `claude -n <role-session-name>` or `/rename`.
-2. Once, check `claude agents --json`: if a session with your name is already `busy` in this
+2. Set the role so path-ownership enforcement knows who you are:
+   `COORDINATION_ROLE=<ID> claude`. Without it the ownership hook is inert — it never blocks
+   an unconfigured session, so a missing variable fails silently open, not loudly.
+3. Once, check `claude agents --json`: if a session with your name is already `busy` in this
    `cwd`, don't start — tell the owner.
-3. **Read `coordination/roles/<ID>.md` — the only required file.** It has your zone, what's
-   open, what's next, and where to go for detail.
 
-Nothing else is required reading at start. Everything else is read on demand — see the index
-below.
+`claude agents` sees only Claude Code sessions on this machine. It is a convenience for
+catching an accidental double-start, not the liveness answer — git is, per `AGENTS.md`.
 
-> Claude Code itself coordinates sessions **as processes**; this project's own rules only
-> coordinate the **subject-matter** work. There are no locks, heartbeats, or nickname registries
-> here — don't add them; `claude agents` already answers "who's working right now."
+## Subagents, teammates, and this scaffold
 
-## Guardrails — breaking these is not easily reversible
+Claude Code can parallelise work inside one session (subagents) and across several sessions it
+spawns itself (agent teams, experimental and off by default). Both are useful and neither
+replaces the journals:
 
-Fill this section in with your project's actual hard constraints. Typical shape:
-
-- Some path is **read-only** for every role except one, which touches it only under a
-  one-time owner sign-off (e.g. production data, a frozen pipeline).
-- `git push` — **only with the owner's direct permission**. Never force-push, `rm -rf`, or
-  rewrite history.
-- **Work only in your own zone.** A request outside it doesn't get done — explain whose zone it
-  is, log it in `coordination/HANDOFFS.md`, offer to switch. Not sure whose zone — ask.
-- Commit format: `[<ID>]` prefix + trailers **as the last paragraph, no blank line inside the
-  block** (`CHARTER.md §4` has the exact gotcha and why it matters).
-- Any domain-specific quality bar worth stating as a hard rule (e.g. "a fit result needs residual
-  statistics, not just one number").
-
-## Index: what to read, and when
-
-As files grow, keep this table's byte/token estimates honest — a stale number here means a role
-decides "read or skip" based on a price that stopped being true, which is worse than no estimate
-at all. Whoever edits a listed file is responsible for updating its row.
-
-`coordination/roles/<ID>.md` cold-start budget (suggest ≤1200 tokens ≈ 2400 bytes) is checked
-automatically by the `SessionStart` hook this skill installs
-(`.claude/hooks/check-context-budget.sh` + `budget.json`) — see `references/setup.md` in this
-skill for how it's wired in. That means the number in this table can't silently go stale the way
-a purely-documented budget would — the hook warns on its own when a role file grows past it.
-
-| File | Cost | Read when |
+| | Where its state lives | Survives the session |
 |---|---|---|
-| `coordination/roles/<ID>.md` | ≤2400 B, every role | **always, at start** |
-| `coordination/CHARTER.md` | ~ | a rule is unclear or you're about to break it |
-| `coordination/PROJECT.md` | ~ | need the whole role/zone table |
-| `coordination/OWNERSHIP.md` | ~ | a zone dispute, or creating a new top-level directory |
-| `coordination/INDEX.md` (if you generate one — see `build_index.py`) | ~ | need the open-items list from QUESTIONS/HANDOFFS without grepping |
-| `coordination/QUESTIONS.md` | ~ | ⚠ **search, don't read in full** once it's grown — need the owner's decision on something |
-| `coordination/HANDOFFS.md` | ~ | ⚠ **search, don't read in full** once it's grown |
-| `coordination/ACTIVITY.md` | ~ | ⚠ **never in full** once it's grown — search by date/tag |
+| Subagents / agent teams | `~/.claude/`, machine-local, one team per session | no — removed on exit |
+| `coordination/*.md` | this git repository | yes, and on every machine |
 
-## Repository layout
-
-Fill in per project: which directories are the active/live layer, which (if any) are frozen
-legacy, which hold applications/tools, where history goes (`archive/`).
+So: spawn teammates for parallel exploration as much as you like, and write the outcome into
+`HANDOFFS.md`, `QUESTIONS.md` or `ACTIVITY.md` before the session ends.
 
 ## Path-dependent rules
 
-If your project has commands, data formats, or domain background that only matters when a
-session actually touches specific paths, don't put them in this always-loaded file — put them in
-`.claude/rules/*.md` with a `paths:` frontmatter glob instead (see `references/setup.md` for the
-mechanism and why it's worth using: it keeps cold start cheap for roles that never touch those
-paths, while still being there automatically the moment a session does touch them).
+Put commands, data formats, or domain background that only matters for specific paths into
+`.claude/rules/*.md` with a `paths:` frontmatter glob, not into this always-loaded file. It
+keeps cold start cheap for roles that never touch those paths, while still loading
+automatically the moment a session does.
 
 | Rule | Fires on | What's inside |
 |---|---|---|
 | *(example)* `.claude/rules/pipeline-commands.md` | `src/pipeline/**` | run/test/verify commands |
+
+Three glob rules worth knowing before you write one — see the skill's `references/setup.md` for the full
+version, and `coordination/tools/check_rules.py` to check your files against them:
+
+- `[` starts a bracket expression. A literal one must be escaped (`photos \[2024/**`);
+  unescaped, the pattern matches nothing.
+- A rule's whole `paths:` list shares a budget of 1,000 expanded patterns and 4 MiB. Each
+  brace group multiplies: `{a,b}/{c,d}/*.{ts,tsx}` is eight patterns. Over budget, the pattern
+  is used unexpanded and its literal braces match no files.
+- No `paths:` key at all means the rule loads unconditionally, like this file.
+
+## Automatic checks
+
+This scaffold ships three hooks (the skill's `references/setup.md` wires them up; the last two are opt-in):
+
+| Hook | Event | Effect |
+|---|---|---|
+| `check-context-budget.py` | `SessionStart` | warns when a role file exceeds its byte budget; **never blocks** |
+| `check-path-ownership.py` | `PreToolUse` | denies a file write outside your zone in `OWNERSHIP.md` |
+| `check-commit-trailers.py` | `PostToolUse` | reports a commit whose `CHARTER.md §4` trailers git did not parse |
+
+The ownership hook exists because instruction files are context, not configuration: Claude Code
+treats them as guidance and a hook is the documented way to block an action regardless. It does
+not inspect `Bash`, so a shell command that writes is not caught — use `permissions.deny` for
+paths that must never be touched at all.
+
+The trailer hook exists for the same reason, measured rather than assumed: sessions that had
+just read `CHARTER.md §4` still produced commits whose trailer block git could not parse. It
+runs *after* a `Bash` command and asks git what git sees, so unlike the ownership hook it
+predicts nothing about the shell — it reads a commit that already exists.
+
+To debug which instruction files actually loaded, and why a path-scoped rule did or didn't
+fire, use the `InstructionsLoaded` hook.

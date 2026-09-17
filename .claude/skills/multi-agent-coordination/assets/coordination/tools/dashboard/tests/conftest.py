@@ -16,6 +16,81 @@ if str(DASHBOARD_ROOT) not in sys.path:
 if str(DASHBOARD_ROOT.parent) not in sys.path:
     sys.path.insert(0, str(DASHBOARD_ROOT.parent))
 
+# This directory too, so a test module can `from conftest import shipped_hook`. pytest imports
+# conftest by path without putting it on sys.path, and the alternative to one shared helper is
+# the same path-resolution logic copied into three files -- which is the duplication this
+# project spends most of its time removing.
+_TESTS_DIR = Path(__file__).resolve().parent
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
+
+# ---------------------------------------------------------------------------------------
+# This suite ships into consumer projects, and it runs in two different trees
+# ---------------------------------------------------------------------------------------
+#
+# In the skill repository the files sit under `assets/`, where the hooks are staged as
+# `dot-claude/hooks/` and the instruction files as `*.template`. The installer renames both
+# on the way in, so an installed project has `.claude/hooks/` and filled-in files, and every
+# path written for the staging layout resolves to nothing.
+#
+# That was issue #54: 41 of 334 tests failed on a clean installation, for a reason that had
+# nothing to do with the project. A permanently red suite is worse than no suite -- it stops
+# answering the question an update pass actually asks, which is "did I break something".
+#
+# Two different problems, so two different answers:
+#
+#   * The hook tests are worth keeping in a consumer project -- those hooks ARE installed and
+#     do run there. They get a resolver, below.
+#   * Tests of the skill repository's own layout (templates, `git ls-files assets/`, the
+#     staging directory itself) cannot mean anything in a project that has none of it. They
+#     are marked `skill_repo` and skipped where that layout is absent, the way `streamlit`
+#     already marks the tests that need an optional dependency.
+
+#: `assets/` in the skill repository; the project root in an installed project.
+SCAFFOLD_ROOT = Path(__file__).resolve().parents[4]
+
+#: True in the skill repository, where the pre-install staging layout exists.
+IN_SKILL_REPO = (SCAFFOLD_ROOT / "dot-claude").is_dir()
+
+
+def shipped_hook(name: str) -> Path:
+    """Locate a hook in whichever of the two layouts this tree is.
+
+    Installed layout wins when both exist, because a project that vendored the skill inside
+    itself should still be testing the hook it actually runs.
+    """
+    installed = SCAFFOLD_ROOT / ".claude" / "hooks" / name
+    if installed.exists():
+        return installed
+    return SCAFFOLD_ROOT / "dot-claude" / "hooks" / name
+
+
+def pytest_configure(config):
+    # Registered here rather than in pytest.ini, because pytest.ini lives at the skill repo
+    # root and deliberately does NOT ship -- so in a consumer project every marked test
+    # raised PytestUnknownMarkWarning. `streamlit` is registered for the same reason; it had
+    # been warning in installed projects since it was introduced.
+    config.addinivalue_line(
+        "markers",
+        "skill_repo: needs the skill repository's own pre-install layout (assets/, "
+        "dot-claude/, *.template); skipped in an installed project",
+    )
+    config.addinivalue_line(
+        "markers",
+        "streamlit: requires streamlit to be installed (UI layer; skipped otherwise)",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    if IN_SKILL_REPO:
+        return
+    skip = pytest.mark.skip(
+        reason="needs the skill repo's pre-install layout; this tree is an installed project")
+    for item in items:
+        if "skill_repo" in item.keywords:
+            item.add_marker(skip)
+
 
 
 
@@ -105,6 +180,18 @@ Built by coordination dashboard — summarizes number/status/line to jump to.
 """
 
 
+def write_fixture(path: Path, text: str, newline: str = "\n") -> Path:
+    """Write a fixture file with explicit line endings.
+
+    Not Path.write_text(newline=...): that argument only exists on Python 3.10+, and the
+    project's declared floor is 3.9. The 3.9 leg of CI is what caught this -- locally it
+    passed on 3.11, which is exactly why the matrix is there.
+    """
+    with open(path, "w", encoding="utf-8", newline=newline) as handle:
+        handle.write(text)
+    return path
+
+
 @pytest.fixture
 def mock_git_repo(tmp_path: Path) -> Dict[str, Path]:
     """
@@ -125,16 +212,16 @@ def mock_git_repo(tmp_path: Path) -> Dict[str, Path]:
     coord_dir.mkdir(parents=True, exist_ok=True)
 
     board_file = coord_dir / "BOARD.md"
-    board_file.write_text(CANONICAL_BOARD, encoding="utf-8", newline="\n")
+    write_fixture(board_file, CANONICAL_BOARD, "\n")
 
     questions_file = coord_dir / "QUESTIONS.md"
-    questions_file.write_text(CANONICAL_QUESTIONS, encoding="utf-8", newline="\n")
+    write_fixture(questions_file, CANONICAL_QUESTIONS, "\n")
 
     handoffs_file = coord_dir / "HANDOFFS.md"
-    handoffs_file.write_text(CANONICAL_HANDOFFS, encoding="utf-8", newline="\n")
+    write_fixture(handoffs_file, CANONICAL_HANDOFFS, "\n")
 
     index_file = coord_dir / "INDEX.md"
-    index_file.write_text(CANONICAL_INDEX, encoding="utf-8", newline="\n")
+    write_fixture(index_file, CANONICAL_INDEX, "\n")
 
     # Initial commit of coordination files
     subprocess.run(["git", "add", "."], cwd=repo_dir, check=True, capture_output=True)
@@ -157,41 +244,90 @@ def mock_git_repo(tmp_path: Path) -> Dict[str, Path]:
 
 
 @pytest.fixture
-def crlf_markdown_files(tmp_path: Path) -> Dict[str, Path]:
+def russian_content_files(tmp_path: Path) -> Dict[str, Path]:
+    """Canonical ENGLISH headers and status keywords, with Russian prose and emoji as content.
+
+    This is the supported shape for a non-English project, and it must keep working: the
+    status/type keywords and table headers are protocol tokens that tooling parses, while
+    questions, answers, summaries and handoff bodies are prose in the project's own language.
+
+    Contrast with `russian_schema_files`, where the protocol tokens themselves are Russian
+    and the tools must refuse to guess.
     """
-    Creates coordination markdown files using strict Windows CRLF (\\r\\n) line endings.
+    coord = tmp_path / "ru_content"
+    coord.mkdir(parents=True, exist_ok=True)
+
+    board = (
+        "# Статус ролей 🤖\n\n"
+        "| Role | Status (date) | One-line summary |\n"
+        "|---|---|---|\n"
+        "| архитектор | active (2026-08-27) | Разработка архитектуры и контрактов 📐 |\n"
+        "| тестировщик | idle (2026-08-26) | Ожидание сборки тест-раннера 🧪 |\n"
+    )
+    questions = (
+        "# Вопросы и решения ❓\n\n"
+        "## Пакет 1\n\n"
+        "| # | Question | Owner's answer | Type | Status |\n"
+        "|---|---|---|---|---|\n"
+        "| Q-1 | Поддерживаем ли UTF-8 и эмодзи 🚀? | Да, полная поддержка | blocking | open |\n"
+        "| Q-2 | Формула $\\int_0^1 x^2 dx$ верна? | Абсолютно точно | non-blocking | resolved |\n"
+        "| Q-3 | Как экранировать `cat \\| grep`? | Символом `\\|` | blocking | open |\n"
+    )
+    handoffs = (
+        "# Передачи задач 🤝\n\n"
+        "## [2026-08-27] FROM архитектор TO тестировщик — Создание модуля парсера\n"
+        "- What: Написать `parser.py` с поддержкой русского языка\n"
+        "- Context: Проект координации мультиагентов\n"
+        "- Done when: Все тесты проходят успешно 🎉\n"
+        "- **Status:** taken\n"
+    )
+
+    files = {"dir": coord}
+    for name, text in (("BOARD", board), ("QUESTIONS", questions), ("HANDOFFS", handoffs)):
+        path = coord / f"{name}.md"
+        write_fixture(path, text, "\n")
+        files[f"{name.lower()}_file"] = path
+    return files
+
+
+@pytest.fixture
+def russian_schema_files(tmp_path: Path) -> Dict[str, Path]:
+    """Russian PROTOCOL tokens: translated headers and translated status/type values.
+
+    This is the shape the tools must reject with an explicit diagnostic rather than parse
+    into believable-looking numbers. The skill's references/rationale.md records what happened when the
+    source project let `Статус:` drift in alongside `Status:`.
     """
-    crlf_dir = tmp_path / "crlf_coord"
-    crlf_dir.mkdir(parents=True, exist_ok=True)
+    coord = tmp_path / "ru_schema"
+    coord.mkdir(parents=True, exist_ok=True)
 
-    board_content = CANONICAL_BOARD.replace("\n", "\r\n")
-    questions_content = CANONICAL_QUESTIONS.replace("\n", "\r\n")
-    handoffs_content = CANONICAL_HANDOFFS.replace("\n", "\r\n")
-    index_content = CANONICAL_INDEX.replace("\n", "\r\n")
+    board = (
+        "# Статус ролей\n\n"
+        "| Роль | Статус (дата) | Описание |\n"
+        "|---|---|---|\n"
+        "| архитектор | активен (2026-08-27) | Разработка архитектуры |\n"
+        "| тестировщик | в_процессе (2026-08-26) | Написание тестов |\n"
+    )
+    questions = (
+        "# Вопросы\n\n"
+        "| № | Вопрос | Ответ | Тип | Статус |\n"
+        "|---|---|---|---|---|\n"
+        "| Q-1 | Первый вопрос? | — | блокирующий | открыт |\n"
+        "| Q-2 | Второй вопрос? | Да | неблокирующий | решён |\n"
+    )
+    handoffs = (
+        "# Передачи\n\n"
+        "## [2026-08-27] FROM архитектор TO тестировщик — Модуль парсера\n"
+        "- What: Написать парсер\n"
+        "- **Status:** открыт\n"
+    )
 
-    board_file = crlf_dir / "BOARD.md"
-    with open(board_file, "wb") as f:
-        f.write(board_content.encode("utf-8"))
-
-    questions_file = crlf_dir / "QUESTIONS.md"
-    with open(questions_file, "wb") as f:
-        f.write(questions_content.encode("utf-8"))
-
-    handoffs_file = crlf_dir / "HANDOFFS.md"
-    with open(handoffs_file, "wb") as f:
-        f.write(handoffs_content.encode("utf-8"))
-
-    index_file = crlf_dir / "INDEX.md"
-    with open(index_file, "wb") as f:
-        f.write(index_content.encode("utf-8"))
-
-    return {
-        "dir": crlf_dir,
-        "board_file": board_file,
-        "questions_file": questions_file,
-        "handoffs_file": handoffs_file,
-        "index_file": index_file
-    }
+    files = {"dir": coord}
+    for name, text in (("BOARD", board), ("QUESTIONS", questions), ("HANDOFFS", handoffs)):
+        path = coord / f"{name}.md"
+        write_fixture(path, text, "\n")
+        files[f"{name.lower()}_file"] = path
+    return files
 
 
 @pytest.fixture
@@ -236,13 +372,13 @@ def unicode_markdown_files(tmp_path: Path) -> Dict[str, Path]:
     )
 
     board_file = unicode_dir / "BOARD.md"
-    board_file.write_text(board_content, encoding="utf-8", newline="\n")
+    write_fixture(board_file, board_content, "\n")
 
     questions_file = unicode_dir / "QUESTIONS.md"
-    questions_file.write_text(questions_content, encoding="utf-8", newline="\n")
+    write_fixture(questions_file, questions_content, "\n")
 
     handoffs_file = unicode_dir / "HANDOFFS.md"
-    handoffs_file.write_text(handoffs_content, encoding="utf-8", newline="\n")
+    write_fixture(handoffs_file, handoffs_content, "\n")
 
     return {
         "dir": unicode_dir,

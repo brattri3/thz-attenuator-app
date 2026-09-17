@@ -223,7 +223,7 @@ def main():
             "commits_by_week": weeks,
             "caveat": "git has no cost/token data; output and pace is all this contains",
         }
-        with open(args.json, "w", encoding="utf-8") as fh:
+        with open(args.json, "w", encoding="utf-8", newline="\n") as fh:
             json.dump(payload, fh, ensure_ascii=False, indent=2)
         print(f"\nmachine-readable output: {args.json}")
 

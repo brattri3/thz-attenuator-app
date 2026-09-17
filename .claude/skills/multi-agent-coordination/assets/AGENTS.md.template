@@ -1,0 +1,94 @@
+# AGENTS.md — \<PROJECT NAME\>
+
+One or two sentences: what this project is, what its core artifact/output is.
+
+Documentation and commit language: **\<LANGUAGE\>**.
+
+<!-- This file is the vendor-neutral half of the scaffold's instructions. AGENTS.md is the
+     cross-vendor convention for exactly this, governed since December 2025 by the Linux
+     Foundation's Agentic AI Foundation. Anything here applies to every agent session
+     regardless of which tool or model is driving it.
+
+     Tool-specific mechanisms go in that tool's own file, which imports this one — see
+     CLAUDE.md.template. Keep that split: the moment a `claude`-only command lands in this
+     file, a Gemini or Codex session reads an instruction it cannot follow. -->
+
+## Your start
+
+Several role-sessions share this repository (\<list role IDs\> + orchestrator `ORCH`).
+
+1. **Identify yourself.** Your session must know which role it is before it writes anything.
+   How you set that is tool-specific; the one thing that is not optional is that the answer
+   exists and matches a row in `coordination/BOARD.md`.
+2. **Read `coordination/roles/<ID>.md` — the only required file.** It has your zone, what's
+   open, what's next, and where to go for detail.
+
+Nothing else is required reading at start. Everything else is read on demand — see the index
+below.
+
+> **Who is working right now** is answered by git, not by this file: recent commits, active
+> branches, and the worktrees under `.worktrees/`. Some tools can also list their own live
+> sessions, but that answer covers only that tool's sessions on that machine — it is a
+> convenience, never the source of truth. Don't add locks, heartbeats, or a nickname
+> registry here; git already arbitrates.
+>
+> **And git only arbitrates once you have fetched.** `origin/<branch>` is a cache written when
+> your checkout was prepared; in a container it can predate a push that already landed. Run
+> `git fetch origin <branch>` before drawing any conclusion about what is or is not pushed —
+> `CHARTER.md §4`.
+
+## Guardrails — breaking these is not easily reversible
+
+Fill this section in with your project's actual hard constraints. Typical shape:
+
+- Some path is **read-only** for every role except one, which touches it only under a
+  one-time owner sign-off (e.g. production data, a frozen pipeline).
+- `git push` — **only with the owner's direct permission**. Never force-push, `rm -rf`, or
+  rewrite history.
+- **Work only in your own zone.** A request outside it doesn't get done — explain whose zone it
+  is, log it in `coordination/HANDOFFS.md`, offer to switch. Not sure whose zone — ask.
+  `coordination/OWNERSHIP.md` is the map, and it can be enforced rather than merely believed:
+  see the skill's `references/setup.md` for the ownership hook and the generated `CODEOWNERS`.
+- Commit format: `[<ID>]` prefix + trailers **as the last paragraph, no blank line inside the
+  block** (`CHARTER.md §4` has the exact gotcha and why it matters).
+- Any domain-specific quality bar worth stating as a hard rule (e.g. "a fit result needs residual
+  statistics, not just one number").
+
+## Index: what to read, and when
+
+As files grow, keep this table's byte/token estimates honest — a stale number here means a role
+decides "read or skip" based on a price that stopped being true, which is worse than no estimate
+at all. Whoever edits a listed file is responsible for updating its row.
+
+| File | Cost | Read when |
+|---|---|---|
+| `coordination/roles/<ID>.md` | ≤2400 B, every role | **always, at start** |
+| `coordination/CHARTER.md` | ~ | a rule is unclear or you're about to break it |
+| `coordination/PROJECT.md` | ~ | need the whole role/zone table |
+| `coordination/OWNERSHIP.md` | ~ | a zone dispute, or creating a new top-level directory |
+| `coordination/INDEX.md` (if you generate one — see `build_index.py`) | ~ | need the open-items list from QUESTIONS/HANDOFFS without grepping |
+| `coordination/QUESTIONS.md` | ~ | ⚠ **search, don't read in full** once it's grown — need the owner's decision on something |
+| `coordination/HANDOFFS.md` | ~ | ⚠ **search, don't read in full** once it's grown |
+| `coordination/ACTIVITY.md` | ~ | ⚠ **never in full** once it's grown — search by date/tag |
+
+## What the journals are for
+
+`BOARD.md`, `QUESTIONS.md`, `HANDOFFS.md` and `ACTIVITY.md` are the project's **durable**
+memory: they live in git, survive every session, and are readable by any tool on any machine.
+
+Some agent tools now ship their own shared task list and inter-agent messaging. Those are
+**working** memory: scoped to one session, stored outside the repository, and discarded when
+the session ends. Use them freely for the task in front of you — but a decision, a handoff, or
+a state change that must outlive the session gets written here, or it is lost.
+
+## Repository layout
+
+Fill in per project: which directories are the active/live layer, which (if any) are frozen
+legacy, which hold applications/tools, where history goes (`archive/`).
+
+## Path-dependent rules
+
+If your project has commands, data formats, or domain background that only matters when a
+session actually touches specific paths, don't put them in this always-loaded file. Most agent
+tools support some form of path-scoped rule file; the mechanism and its exact glob syntax are
+tool-specific, so they are documented in the tool's own instruction file rather than here.

@@ -59,7 +59,7 @@ its own PR. Don't present it as enforcement it isn't providing.
 `assets/dot-github/workflows/coordination-checks.yml.template` re-runs the same two checks the
 local hooks already do — commit trailer format, cold-start budget — but on GitHub's own runner,
 independent of whether the pushing session had the local hook installed. It deliberately reuses
-`check-context-budget.sh` verbatim rather than reimplementing the budget check in a different
+`check-context-budget.py` verbatim rather than reimplementing the budget check in a different
 language — one rule, one implementation, checked in two places.
 
 **When this earns its place:** once you've actually had a commit land with broken trailers or an
@@ -100,6 +100,43 @@ double as a usable API token. Don't assume; degrade explicitly:
 3. If neither works, stop at the last fully-automatable step (a pushed branch, a ready compare
    URL) and hand the one remaining click to a human — and say so plainly in the result, rather than
    implying the automation completed when it didn't.
+
+### The same statelessness applies to plain git state
+
+A session is stateless about its container, and that includes the container's **remote-tracking
+refs**. `origin/main` is a cache written when the checkout was prepared; nothing refreshes it on
+its own. In a cloud container provisioned once at session start, or a long-lived one, it can be a
+snapshot from before a push that has already landed.
+
+So the rule in `CHARTER.md §4`: **fetch before reasoning about `origin`.**
+
+```bash
+git fetch origin main    # then compare
+git rev-list --left-right --count origin/main...HEAD
+```
+
+Two cold-start sessions were run against the same repository at the same moment (2026-08-29,
+the project this scaffold was extracted from). Without a fetch, one read the cached ref and
+reported **53 unpushed commits at risk of being lost on container rebuild**. With a fetch, the
+other reported **0 ahead, 0 behind** — the push had already happened. Same repository, same
+instant, opposite diagnoses.
+
+The cost is not a wrong number in a status line. It is that the wrong number is *actionable*: a
+session convinced work is about to be lost will re-push, force-push, or start moving branches
+around, and `CHARTER.md §4` forbids exactly those operations for exactly this reason. One `git
+fetch` removes the whole failure mode.
+
+### And its corollary: don't clone what you already have
+
+When the repository is already attached to the session, an explicit `git clone` into a separate
+directory in a cold-start prompt buys nothing. Measured on the same project: **+157 MB of disk
+and +3.4 seconds**, producing no information beyond confirming `origin` was current — and that
+confirmation came from the clone's implicit fetch, which `git fetch origin` gives for free on the
+checkout already present.
+
+Reach for a real clone only when a from-scratch checkout is the thing being exercised: timing a
+cold provision, testing container setup, or verifying that a fresh clone of the scaffold actually
+works. For "am I seeing current `origin` state?", fetch.
 
 ## Setting this up
 

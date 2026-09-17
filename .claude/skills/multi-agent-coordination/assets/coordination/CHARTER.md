@@ -9,13 +9,22 @@
 Role ID (see `PROJECT.md` for the roster) is set at launch. Not set — **ask the owner**, don't
 work anonymously.
 
-At start: name the session (`claude -n <session-name>` or `/rename`); once, check
-`claude agents --json` — if a session with your name is already `busy` in this `cwd`, don't
-start, tell the owner. There are no locks, timeouts, or heartbeat files in this project — a
-process registry duplicates what `claude agents` already gives you for free, and it rots the
-moment it's not perfectly maintained. If your project spans multiple machines/environments
-(a laptop, a workstation, a cloud sandbox), `claude agents` only sees the current one —
-coordination between environments happens through git, not through a live process list.
+At start: name the session (on Claude Code, `claude -n <session-name>` or `/rename`; on
+another platform, whatever it offers) and, if your tool can list its own live sessions, check
+that one with your name isn't already `busy` in this `cwd` — on Claude Code that is
+`claude agents --json`. If it is, don't start; tell the owner.
+
+There are no locks, timeouts, or heartbeat files in this project. A process registry rots the
+moment it isn't perfectly maintained, and it duplicates what a tool's own session list already
+gives you for free. But note what that list is and isn't: it sees only **that tool's** sessions
+on **this machine**. Across machines, environments, or platforms — a laptop, a workstation, a
+cloud sandbox, a Gemini session — it sees nothing. There, and in any dispute, **git is the
+arbiter**: recent commits, active branches, and the worktrees under `.worktrees/`.
+
+The same applies to a tool's built-in teammates or subagents. Their shared task list lives
+outside this repository and is discarded when the session ends, so it answers "what is my team
+doing right now", never "what did this project decide". Anything that must outlive the session
+belongs in `HANDOFFS.md`, `QUESTIONS.md` or `ACTIVITY.md`.
 
 ## 2. Zones — by layer, not by directory
 
@@ -49,20 +58,55 @@ handoff.
   Session: <ID>
   Reason: <why> — one line, a line break breaks the whole block
   ```
-  If your project can wire up a `PostToolUse` hook that runs `git interpret-trailers --parse`
-  after every commit and reports back when trailers didn't parse, do it — a rule enforced by a
-  hook stays true; a rule that only lives in this document rots the moment nobody's checking.
+  This one does not hold on attention, and that is measured, not assumed: 10 of 29 commits in
+  one week carried a `Session:` line git did not recognise, and in a later run 1 of 7 commits
+  by sessions that had just read this section had no trailer block at all. So the scaffold
+  ships the check — `.claude/hooks/check-commit-trailers.py`, wired per the skill's `references/setup.md
+  §9`. It asks git what git parses, after the commit, and tells you to `--amend` when the
+  answer is nothing. A rule enforced by a hook stays true; a rule that only lives in this
+  document rots the moment nobody's checking.
 - Commit **only your own paths** — no blind `git add -A`.
+- **`git fetch` before you say anything about `origin`.** A remote-tracking ref is a cache, and
+  in an ephemeral or long-lived container it can predate a push that already landed — including
+  one made by another session or from another machine. Never read `origin/<branch>` and report
+  "unpushed commits" or divergence without refreshing it first:
+  ```
+  git fetch origin <branch>      # then, and only then, compare
+  ```
+  This is not pedantry about accuracy. The danger is what a false diagnosis provokes: a session
+  that believes work is about to be lost reaches for a re-push, a force-push, or branch surgery —
+  against a problem that does not exist. Measured case: two sessions on the same repository at the
+  same moment, one reporting 53 commits at risk and the other 0 ahead / 0 behind. The only
+  difference was the fetch.
 - `git push` — **only with the owner's direct permission**. Never force-push or rewrite history.
 - A shared-file conflict on `main` → don't force it, call the orchestrator.
 - Don't reference commit hashes in coordination docs — link by date + file instead (hashes churn
   if history is ever rewritten; dates don't).
+- **Never commit secrets** — API keys, connection strings, tokens, private keys. Keep them in an
+  untracked, gitignored `.env` or the platform's own secret store, never inside a role's tracked
+  zone, and never hardcoded into a config file "just for testing." Don't reinvent a scanner for
+  this: an existing one (`gitleaks`, `trufflehog`) as a pre-commit or CI step catches far more
+  than a scaffold-local regex would, and stays maintained by people whose whole job is that list.
+- **Heavy binaries don't belong in `coordination/`** — durable knowledge here is markdown and
+  JSON. Screenshots, audio, and photos captured during work belong in object storage or Git LFS,
+  not the coordination tree; `coordination/tools/check-context-budget.py`'s glob + `limit_bytes`
+  rules (the skill's `references/setup.md §2`) can warn when one lands there anyway.
 
 ## 5. Isolation (git)
 
 The shared working directory on `main` is for live shared state. A `git worktree` + branch is
 worth it for a role that edits shared/core code heavily, or that wants isolation from everyone
 else's in-flight changes: `git worktree add ../<repo>-<ID> session/<ID>`. The orchestrator merges.
+
+This is not a local invention — running one agent session per worktree is the standard
+isolation model, and Claude Code documents it directly (`/docs/en/worktrees`) as the way to run
+several sessions in parallel without automated team coordination. Nothing here needs a wrapper
+script; the one-line command above is the whole mechanism.
+
+One gotcha worth knowing because this scaffold's own tooling hit it: inside a worktree, `.git`
+is a **file**, not a directory. Any check that tests `isdir(".git")` to find the project root
+walks straight past the worktree root — which is why `check-context-budget.py` and
+`check-path-ownership.py` both test `exists()` instead.
 
 ## 6. Working protocol
 
@@ -89,7 +133,7 @@ itself, read `coordination/roles/<ID>.md`. That's it.
 - **A shared file needed by two roles** → whoever announced first in `ACTIVITY.md` goes first,
   the other waits.
 
-## 8. Background workers (subagents)
+## 8. Delegated work: subagents and launched sessions
 
 **Boundary: a subagent is not a role session.** A subagent has its own context window, starts
 from nothing (it doesn't see the calling session's history), doesn't survive the call that
@@ -109,6 +153,25 @@ spawned it, has no transcript kept, and isn't listed by `claude agents`. Concret
   ergonomics, that belongs in `LAUNCH_PROMPTS.md` as a prompt template a human or session reads
   and acts on — not as a subagent definition standing in for a zone-holding role.
 
+**A session you launched is a third thing, and the channel to it is one-way.** A subagent
+returns its result to whoever called it. A separately launched session — a cloud session started
+through an API or a web UI, a session on another machine — has exactly one input, the prompt that
+started it, and no return channel. Measured over a week on Claude Code for the web: every attempt
+to message a launched session failed (`No agent named ... is reachable`), the harness listed no
+reachable agents, and no tool read the session's transcript — the status field carries a coarse
+summary, not the conversation. Assume this of any harness until you have checked otherwise: the
+cost of assuming the opposite is work that nobody notices was never done.
+
+- **The whole task goes in the opening prompt.** There is no "start it and steer it as it goes."
+  A launched session that needs a decision mid-flight stops, and nothing announces that it did.
+- **Its result must land somewhere durable, or it does not exist** — a commit, a pushed branch, a
+  published page. Name that destination in the prompt; the session's reply is not a destination.
+- **Verify against primary sources, never the session's own report.** `git fetch` and then
+  `git log` on the branch it claims to have pushed, the file on disk, the Issue or PR through the
+  API. Measured case: a launched session reported "7 bugs fixed, 93 tests passing" and had not
+  opened the PR it was asked to open. The summary was confident and wrong; only the independent
+  check caught it. `LAUNCH_PROMPTS.md` has the prompt shape that survives all three.
+
 ## 9. Communication style with the owner
 
 Adjust to your project — if the owner isn't expert in the domain some roles work in, prefer:
@@ -126,5 +189,20 @@ Proposals about the coordination paradigm itself → `ACTIVITY.md` tagged `[prop
 orchestrator consolidates.
 
 **A standing orchestrator duty:** watch for cancelled mechanisms growing back. A new rule that
-answers "who's working right now" is redundant by construction — `claude agents` already answers
-that.
+answers "who's working right now" is redundant by construction — git answers it, and on a
+single machine the tool's own session list answers it sooner.
+
+**A second standing duty: hand over before you are forced to.** The orchestrator session is the
+one that grows without bound — every launch, every verification, every scheduled firing appends to
+it, and all of it is re-read on every turn. Measured on one project: role files were held to 2400
+bytes each while the orchestrator's own context reached 508,093 tokens of a 1,000,000 budget, so
+the coordination layer cost more per turn than the work it was coordinating. Note which half of
+that the budget hook was watching.
+
+So when the session grows long: write what matters into `ACTIVITY.md` as one dated entry **first**,
+then compact or start a fresh orchestrator session — in that order, and before anything forces the
+choice. This is the cheap operation the rest of the scaffold exists to make cheap: the handover
+costs one journal entry, because everything the next session needs is already in files. The
+failure mode is the opposite belief — that a long-running session is precious and restarting it is
+expensive — which is what lets one session run for weeks and carry its whole history into every
+turn.
